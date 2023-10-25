@@ -1,0 +1,25 @@
+[package]
+name = "felis"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+path = "src/bin/felis-server.rs"
+name = "felis-server"
+
+[[bin]]
+path = "src/bin/felis.rs"
+name = "felis"
+
+
+
+[dependencies]
+tokio = {version = "1.33.0", features = ["net", "process", "rt", "macros"]} # TODO: rt and macros only need in tests
+async-trait = "0.1.74"
+
+[dev-dependencies]
+pretty_assertions = "1.4.0"
