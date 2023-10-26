@@ -18,8 +18,13 @@ name = "felis"
 
 
 [dependencies]
-tokio = {version = "1.33.0", features = ["net", "process", "rt", "macros"]} # TODO: rt and macros only need in tests
+tokio = {version = "1.33.0", features = ["net", "process", "io-util","rt-multi-thread", "fs", "rt", "macros"]} # TODO: rt and macros only need in tests
 async-trait = "0.1.74"
+thiserror = "1.0.50"
+clap = {version = "4.4.7", features = ["derive"]}
+signal-hook = "0.3.17"
 
 [dev-dependencies]
 pretty_assertions = "1.4.0"
+tempfile = "3.8.0"
+test_utils = { "path" = "test_utils" }
