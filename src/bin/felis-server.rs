@@ -1,3 +1,4 @@
+use felis::server::executor;
 use felis::server::{self, UnixSocket};
 use felis::{command, Result};
 use signal_hook::consts::{SIGINT, SIGQUIT, SIGTERM};
@@ -30,7 +31,7 @@ async fn main() -> Result<()> {
     let signals_task = tokio::spawn(signal_handler(signals, socket_path));
 
     // run the server
-    server::listen(socket).await;
+    server::listen(&socket, &executor::Configurable).await;
 
     // clean up
     handle.close();
