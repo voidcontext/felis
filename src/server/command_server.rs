@@ -18,13 +18,13 @@ where
     E: Executor + std::marker::Sync,
 {
     loop {
-        if let Ok(command::SHUTDOWN) = handle_connection(command_listener, executor).await {
+        if let Ok(Some(command::SHUTDOWN)) = handle_connection(command_listener, executor).await {
             break;
         }
     }
 }
 
-async fn handle_connection<R, C, E>(command_listener: &C, executor: &E) -> Result<u8>
+async fn handle_connection<R, C, E>(command_listener: &C, executor: &E) -> Result<Option<u8>>
 where
     R: AsyncRead + AsyncWrite + std::marker::Unpin + std::marker::Send,
     C: CommandListener<R>,
@@ -32,41 +32,40 @@ where
 {
     match command_listener.accept().await {
         Ok(mut reader_writer) => {
-            let cmd = reader_writer
-                .read_u8()
-                .await
-                .expect("Couldn't read command from reader");
+            let cmd = reader_writer.read_u8().await.ok();
 
-            match cmd {
-                command::SHUTDOWN => (),
-                command::ECHO => {
-                    let msg = reader_writer.read_payload().await?;
+            if let Some(cmd) = cmd {
+                match cmd {
+                    command::SHUTDOWN => (),
+                    command::ECHO => {
+                        let msg = reader_writer.read_payload().await?;
 
-                    reader_writer.write_payload(&msg).await?;
-                }
-                command::OPEN_IN_HELIX => {
-                    let config_flag = reader_writer.read_u8().await?;
-                    let kitty_tab = reader_writer.read_u8().await?;
-                    let path = String::from_utf8(reader_writer.read_payload().await?)?;
+                        reader_writer.write_payload(&msg).await?;
+                    }
+                    command::OPEN_IN_HELIX => {
+                        let config_flag = reader_writer.read_u8().await?;
+                        let kitty_tab = reader_writer.read_u8().await?;
+                        let path = String::from_utf8(reader_writer.read_payload().await?)?;
 
-                    let flag = if config_flag & Flag::DryRun as u8 == 1 {
-                        Some(Flag::DryRun)
-                    } else {
-                        None
-                    };
+                        let flag = if config_flag & Flag::DryRun as u8 == 1 {
+                            Some(Flag::DryRun)
+                        } else {
+                            None
+                        };
 
-                    let mut commands = [
-                        kitty_send_text_cmd(kitty_tab, r"\E"),
-                        kitty_send_text_cmd(kitty_tab, &format!(":open {path}")),
-                        kitty_send_text_cmd(kitty_tab, r"\r"),
-                    ];
+                        let mut commands = [
+                            kitty_send_text_cmd(kitty_tab, r"\E"),
+                            kitty_send_text_cmd(kitty_tab, &format!(":open {path}")),
+                            kitty_send_text_cmd(kitty_tab, r"\r"),
+                        ];
 
-                    let output = executor.execute_all(&mut commands, &flag).await?;
+                        let output = executor.execute_all(&mut commands, &flag).await?;
 
-                    reader_writer.write_payload(&output.stdout).await?;
-                }
-                _ => todo!(),
-            };
+                        reader_writer.write_payload(&output.stdout).await?;
+                    }
+                    _ => todo!(),
+                };
+            }
 
             Ok(cmd)
         }
