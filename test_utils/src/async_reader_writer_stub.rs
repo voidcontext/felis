@@ -8,13 +8,15 @@ pub struct ReaderWriterStub {
 }
 
 impl ReaderWriterStub {
+    #[must_use]
     pub fn new(to_read: Vec<u8>) -> Self {
         Self {
             to_read: Arc::new(Mutex::new(to_read)),
-            written: Default::default(),
+            written: Arc::default(),
         }
     }
 
+    #[must_use]
     pub fn written(&self) -> Arc<Mutex<Vec<u8>>> {
         Arc::clone(&self.written)
     }

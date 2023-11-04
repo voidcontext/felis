@@ -198,11 +198,35 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "clap",
+ "felis-command",
+ "felis-command-macro",
  "pretty_assertions",
  "signal-hook",
  "tempfile",
  "test_utils",
  "thiserror",
+ "tokio",
+]
+
+[[package]]
+name = "felis-command"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "pretty_assertions",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
+name = "felis-command-macro"
+version = "0.1.0"
+dependencies = [
+ "felis-command",
+ "pretty_assertions",
+ "proc-macro2",
+ "quote",
+ "syn",
  "tokio",
 ]
 

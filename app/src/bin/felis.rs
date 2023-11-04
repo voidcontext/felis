@@ -2,11 +2,11 @@ use std::println;
 
 use clap::{Parser, Subcommand};
 use felis::{
-    command,
+    command::{self, Echo, OpenInHelix},
     server::executor::Flag,
-    util::{ReadPayloadExt, WritePayloadExt},
     Result,
 };
+use felis_command::{ReadWire, WriteWire};
 use tokio::{io::AsyncWriteExt, net::UnixStream};
 
 #[derive(Parser, Debug)]
@@ -33,26 +33,28 @@ async fn main() -> Result<()> {
     match cli.command {
         Command::Echo { message } => {
             let message = message.join(" ");
-            socket.write_u8(felis::command::ECHO).await?;
-            socket.write_payload(message.as_bytes()).await?;
 
-            let response = socket.read_payload().await?;
-            println!("{}", String::from_utf8(response)?);
+            Echo { message }.write(&mut socket).await?;
+
+            let response = String::read(&mut socket).await?;
+            println!("{response}");
         }
         Command::OpenInHelix { tab_id, path } => {
-            socket.write_u8(felis::command::OPEN_IN_HELIX).await?;
-            socket
-                .write_u8(if cli.dry_run {
-                    Flag::DryRun as u8
-                } else {
-                    0_u8
-                })
-                .await?;
-            socket.write_u8(tab_id).await?;
-            socket.write_payload(path.as_bytes()).await?;
+            let flag = if cli.dry_run {
+                Flag::DryRun
+            } else {
+                Flag::NoOp
+            };
 
-            let response = socket.read_payload().await?;
-            println!("{}", String::from_utf8(response)?);
+            let cmd = OpenInHelix {
+                flag,
+                kitty_tab_id: tab_id,
+                path,
+            };
+            cmd.write(&mut socket).await?;
+
+            let response = String::read(&mut socket).await?;
+            println!("{response}");
         }
         Command::Shutdown => {
             socket.write_u8(command::SHUTDOWN).await?;

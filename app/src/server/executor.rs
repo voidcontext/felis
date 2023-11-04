@@ -1,12 +1,42 @@
 use std::process::{ExitStatus, Output};
 
 use crate::{FelisError, Result};
+use felis_command::{
+    AsyncRead, AsyncReadExt, AsyncWrite, ReadResult, ReadWire, WireFormatReadError, WriteResult,
+    WriteWire,
+};
 use tokio::process::Command;
 
 use async_trait::async_trait;
 
+#[derive(Clone, Copy)]
 pub enum Flag {
-    DryRun = 0b0001,
+    NoOp = 0b00,
+    DryRun = 0b01,
+}
+
+// TODO: derive these
+#[async_trait]
+impl<R: AsyncRead + Unpin + Send> ReadWire<R> for Flag {
+    async fn read(reader: &mut R) -> ReadResult<Box<Self>> {
+        let byte = reader.read_u8().await?;
+
+        match byte {
+            0b00 => Ok(Box::new(Flag::NoOp)),
+            0b01 => Ok(Box::new(Flag::DryRun)),
+            f => Err(WireFormatReadError::UnexpectedError {
+                message: format!("Invalid flag: {f}"),
+            }),
+        }
+    }
+}
+
+#[async_trait]
+impl<W: AsyncWrite + Unpin + Send> WriteWire<W> for Flag {
+    async fn write(&self, writer: &mut W) -> WriteResult {
+        (*self as u8).write(writer).await?;
+        Ok(())
+    }
 }
 
 #[async_trait]

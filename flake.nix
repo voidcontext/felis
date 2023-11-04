@@ -2,8 +2,14 @@
   inputs.nixpkgs.url = "nixpkgs/release-23.05";
   inputs.flake-utils.url = "github:numtide/flake-utils";
 
-  inputs.nix-rust-utils.url = "git+https://git.vdx.hu/voidcontext/nix-rust-utils.git?ref=refs/tags/v0.9.0";
+  inputs.crane = {
+    url = "github:ipetkov/crane";
+    inputs.nixpkgs.follows = "nixpkgs";
+  };
+  inputs.nix-rust-utils.url = "git+https://git.vdx.hu/voidcontext/nix-rust-utils.git?ref=refs/heads/skip-build-deps";
   inputs.nix-rust-utils.inputs.nixpkgs.follows = "nixpkgs";
+  inputs.nix-rust-utils.inputs.crane.follows = "crane";
+
 
   inputs.rust-overlay.url = "github:oxalica/rust-overlay";
 
@@ -14,7 +20,7 @@
     rust-overlay,
     ...
   }: let
-    mkNru = pkgs: 
+    mkNru = pkgs:
       nix-rust-utils.mkLib {
         inherit pkgs;
         toolchain = pkgs.rust-bin.stable.latest.default;
@@ -27,6 +33,7 @@
         buildInputs = pkgs.lib.optionals pkgs.stdenv.isDarwin [
           pkgs.libiconv
         ];
+        skipBuildDeps = true;
       };
     in rec {
       crate = nru.mkCrate (commonArgs

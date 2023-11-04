@@ -1,10 +1,11 @@
+use felis::command::Shutdown;
 use felis::server::executor;
 use felis::server::{self, UnixSocket};
-use felis::{command, Result};
+use felis::Result;
+use felis_command::WriteWire;
 use signal_hook::consts::{SIGINT, SIGQUIT, SIGTERM};
 use signal_hook::iterator::exfiltrator::SignalOnly;
 use signal_hook::iterator::SignalsInfo;
-use tokio::io::AsyncWriteExt;
 use tokio::net::UnixStream;
 
 async fn signal_handler(mut signals: SignalsInfo, socket_path: &str) {
@@ -12,7 +13,7 @@ async fn signal_handler(mut signals: SignalsInfo, socket_path: &str) {
         match signal {
             SIGTERM | SIGINT | SIGQUIT => {
                 let mut socket = UnixStream::connect(socket_path).await.unwrap();
-                socket.write_u8(command::SHUTDOWN).await.unwrap();
+                Shutdown.write(&mut socket).await.unwrap();
                 break;
             }
             _ => unreachable!(),
