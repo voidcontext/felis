@@ -2,12 +2,11 @@ use std::io;
 use std::string::FromUtf8Error;
 
 use async_trait::async_trait;
-pub use std::pin::Pin;
 use thiserror::Error;
-pub use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 #[derive(Error, Debug)]
-pub enum WireFormatReadError {
+pub enum WireReadError {
     #[error("I/O error")]
     IO(#[from] io::Error),
     #[error("FromUtf8 error")]
@@ -17,53 +16,53 @@ pub enum WireFormatReadError {
 }
 
 #[derive(Error, Debug)]
-pub enum WireFormatWriteError {
+pub enum WireWriteError {
     #[error("I/O error")]
     IO(#[from] io::Error),
     #[error("unexpected error: {message}")]
     UnexpectedError { message: String },
 }
 
-pub type ReadResult<A> = Result<A, WireFormatReadError>;
-pub type WriteResult = Result<(), WireFormatWriteError>;
+pub type WireReadResult<A> = Result<A, WireReadError>;
+pub type WireWriteResult = Result<(), WireWriteError>;
 
 #[async_trait]
-pub trait ReadWire<R: AsyncRead> {
-    async fn read(reader: &mut R) -> ReadResult<Box<Self>>;
+pub trait WireRead<R: AsyncRead> {
+    async fn read(reader: &mut R) -> WireReadResult<Box<Self>>;
 }
 
 #[async_trait]
-pub trait WriteWire<W: AsyncWrite> {
-    async fn write(&self, writer: &mut W) -> WriteResult;
+pub trait WireWrite<W: AsyncWrite> {
+    async fn write(&self, writer: &mut W) -> WireWriteResult;
 }
 
 #[async_trait]
-impl<W: AsyncWrite + Unpin + Send> WriteWire<W> for u8 {
-    async fn write(&self, writer: &mut W) -> WriteResult {
+impl<W: AsyncWrite + Unpin + Send> WireWrite<W> for u8 {
+    async fn write(&self, writer: &mut W) -> WireWriteResult {
         writer.write_u8(*self).await?;
         Ok(())
     }
 }
 
 #[async_trait]
-impl<R: AsyncRead + Unpin + Send> ReadWire<R> for u8 {
-    async fn read(reader: &mut R) -> ReadResult<Box<Self>> {
+impl<R: AsyncRead + Unpin + Send> WireRead<R> for u8 {
+    async fn read(reader: &mut R) -> WireReadResult<Box<Self>> {
         let n = reader.read_u8().await?;
         Ok(Box::new(n))
     }
 }
 
 #[async_trait]
-impl<W: AsyncWrite + Unpin + Send> WriteWire<W> for u16 {
-    async fn write(&self, writer: &mut W) -> WriteResult {
+impl<W: AsyncWrite + Unpin + Send> WireWrite<W> for u16 {
+    async fn write(&self, writer: &mut W) -> WireWriteResult {
         writer.write_u16(*self).await?;
         Ok(())
     }
 }
 
 #[async_trait]
-impl<R: AsyncRead + Unpin + Send> ReadWire<R> for u16 {
-    async fn read(reader: &mut R) -> ReadResult<Box<Self>> {
+impl<R: AsyncRead + Unpin + Send> WireRead<R> for u16 {
+    async fn read(reader: &mut R) -> WireReadResult<Box<Self>> {
         let n = reader.read_u16().await?;
 
         Ok(Box::new(n))
@@ -71,16 +70,16 @@ impl<R: AsyncRead + Unpin + Send> ReadWire<R> for u16 {
 }
 
 #[async_trait]
-impl<W: AsyncWrite + Unpin + Send> WriteWire<W> for usize {
-    async fn write(&self, writer: &mut W) -> WriteResult {
+impl<W: AsyncWrite + Unpin + Send> WireWrite<W> for usize {
+    async fn write(&self, writer: &mut W) -> WireWriteResult {
         writer.write_all(&self.to_be_bytes()).await?;
         Ok(())
     }
 }
 
 #[async_trait]
-impl<R: AsyncRead + Unpin + Send> ReadWire<R> for usize {
-    async fn read(reader: &mut R) -> ReadResult<Box<Self>> {
+impl<R: AsyncRead + Unpin + Send> WireRead<R> for usize {
+    async fn read(reader: &mut R) -> WireReadResult<Box<Self>> {
         let usize_byte_len = (usize::BITS / 8) as usize;
         let mut buf = vec![0; usize_byte_len];
         reader.read_exact(&mut buf).await?;
@@ -91,8 +90,8 @@ impl<R: AsyncRead + Unpin + Send> ReadWire<R> for usize {
 }
 
 #[async_trait]
-impl<W: AsyncWrite + Unpin + Send> WriteWire<W> for String {
-    async fn write(&self, writer: &mut W) -> WriteResult {
+impl<W: AsyncWrite + Unpin + Send> WireWrite<W> for String {
+    async fn write(&self, writer: &mut W) -> WireWriteResult {
         let bytes = self.as_bytes();
 
         bytes.len().write(writer).await?;
@@ -103,8 +102,8 @@ impl<W: AsyncWrite + Unpin + Send> WriteWire<W> for String {
 }
 
 #[async_trait]
-impl<R: AsyncRead + Unpin + Send> ReadWire<R> for String {
-    async fn read(reader: &mut R) -> ReadResult<Box<Self>> {
+impl<R: AsyncRead + Unpin + Send> WireRead<R> for String {
+    async fn read(reader: &mut R) -> WireReadResult<Box<Self>> {
         let len = usize::read(reader).await?;
 
         let mut buf = vec![0; *len];
@@ -117,8 +116,8 @@ impl<R: AsyncRead + Unpin + Send> ReadWire<R> for String {
 }
 
 #[async_trait]
-impl<W: AsyncWrite + Unpin + Send, T: WriteWire<W> + Sync> WriteWire<W> for Vec<T> {
-    async fn write(&self, writer: &mut W) -> WriteResult {
+impl<W: AsyncWrite + Unpin + Send, T: WireWrite<W> + Sync> WireWrite<W> for Vec<T> {
+    async fn write(&self, writer: &mut W) -> WireWriteResult {
         self.len().write(writer).await?;
         for item in self {
             item.write(writer).await?;
@@ -128,8 +127,8 @@ impl<W: AsyncWrite + Unpin + Send, T: WriteWire<W> + Sync> WriteWire<W> for Vec<
 }
 
 #[async_trait]
-impl<R: AsyncRead + Unpin + Send, T: ReadWire<R> + Send> ReadWire<R> for Vec<T> {
-    async fn read(reader: &mut R) -> ReadResult<Box<Self>> {
+impl<R: AsyncRead + Unpin + Send, T: WireRead<R> + Send> WireRead<R> for Vec<T> {
+    async fn read(reader: &mut R) -> WireReadResult<Box<Self>> {
         let len = usize::read(reader).await?;
 
         let mut result = Vec::new();
@@ -145,7 +144,7 @@ impl<R: AsyncRead + Unpin + Send, T: ReadWire<R> + Send> ReadWire<R> for Vec<T> 
 mod test {
     use pretty_assertions::assert_eq;
 
-    use crate::{ReadWire, WriteWire};
+    use crate::{WireRead, WireWrite};
 
     #[tokio::test]
     async fn test_string_wire_format_to_bytes() {

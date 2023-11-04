@@ -2,7 +2,7 @@ use std::println;
 
 use clap::{Parser, Subcommand};
 use felis::{server::executor::Flag, Result};
-use felis_command::{ReadWire, WriteWire};
+use felis_protocol::{WireRead, WireWrite};
 use tokio::net::UnixStream;
 
 #[derive(Parser, Debug)]

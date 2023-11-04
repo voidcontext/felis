@@ -2,8 +2,8 @@
 resolver = "2"
 members = [
   "app",
-  "command",
-  "command_macro"
+  "protocol",
+  "protocol_macro"
 ]
 
 [workspace.package]

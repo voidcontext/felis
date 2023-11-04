@@ -1,8 +1,8 @@
 pub mod server;
 
 use crate::server::executor::Flag;
-use felis_command::{WireFormatReadError, WireFormatWriteError};
-use felis_command_macro::{ReadWire, WriteWire};
+use felis_protocol::{WireReadError, WireWriteError};
+use felis_protocol_macro::{WireRead, WireWrite};
 use std::{io::Error, num::TryFromIntError, string::FromUtf8Error};
 use thiserror::Error;
 
@@ -17,14 +17,14 @@ pub enum FelisError {
     #[error("FromUtf8 error")]
     FromUtf8(#[from] FromUtf8Error),
     #[error("WireFormatRead error")]
-    WireFormatRead(#[from] WireFormatReadError),
+    WireFormatRead(#[from] WireReadError),
     #[error("WireFormatWrite error")]
-    WireFormatWrite(#[from] WireFormatWriteError),
+    WireFormatWrite(#[from] WireWriteError),
     #[error("unexpected error: {message}")]
     UnexpectedError { message: String },
 }
 
-#[derive(ReadWire, WriteWire)]
+#[derive(WireRead, WireWrite)]
 pub enum Command {
     Shutdown,
     Echo(String),

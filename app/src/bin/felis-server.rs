@@ -2,7 +2,7 @@ use felis::server::executor;
 use felis::server::{self, UnixSocket};
 use felis::Command;
 use felis::Result;
-use felis_command::WriteWire;
+use felis_protocol::WireWrite;
 use signal_hook::consts::{SIGINT, SIGQUIT, SIGTERM};
 use signal_hook::iterator::exfiltrator::SignalOnly;
 use signal_hook::iterator::SignalsInfo;

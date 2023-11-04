@@ -21,8 +21,8 @@ async-trait = "0.1.74"
 thiserror = "1.0.50"
 clap = {version = "4.4.7", features = ["derive"]}
 signal-hook = "0.3.17"
-felis-command = { path = "../command" }
-felis-command-macro = { path = "../command_macro" }
+felis-protocol = { path = "../protocol" }
+felis-protocol-macro = { path = "../protocol_macro" }
 
 [dev-dependencies]
 pretty_assertions = "1.4.0"

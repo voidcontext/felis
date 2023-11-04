@@ -1,11 +1,11 @@
 use std::process::{ExitStatus, Output};
 
 use crate::{FelisError, Result};
-use felis_command::{
-    AsyncRead, AsyncReadExt, AsyncWrite, ReadResult, ReadWire, WireFormatReadError, WriteResult,
-    WriteWire,
+use felis_protocol::{WireRead, WireReadError, WireReadResult, WireWrite, WireWriteResult};
+use tokio::{
+    io::{AsyncRead, AsyncReadExt, AsyncWrite},
+    process::Command,
 };
-use tokio::process::Command;
 
 use async_trait::async_trait;
 
@@ -17,14 +17,14 @@ pub enum Flag {
 
 // TODO: derive these
 #[async_trait]
-impl<R: AsyncRead + Unpin + Send> ReadWire<R> for Flag {
-    async fn read(reader: &mut R) -> ReadResult<Box<Self>> {
+impl<R: AsyncRead + Unpin + Send> WireRead<R> for Flag {
+    async fn read(reader: &mut R) -> WireReadResult<Box<Self>> {
         let byte = reader.read_u8().await?;
 
         match byte {
             0b00 => Ok(Box::new(Flag::NoOp)),
             0b01 => Ok(Box::new(Flag::DryRun)),
-            f => Err(WireFormatReadError::UnexpectedError {
+            f => Err(WireReadError::UnexpectedError {
                 message: format!("Invalid flag: {f}"),
             }),
         }
@@ -32,8 +32,8 @@ impl<R: AsyncRead + Unpin + Send> ReadWire<R> for Flag {
 }
 
 #[async_trait]
-impl<W: AsyncWrite + Unpin + Send> WriteWire<W> for Flag {
-    async fn write(&self, writer: &mut W) -> WriteResult {
+impl<W: AsyncWrite + Unpin + Send> WireWrite<W> for Flag {
+    async fn write(&self, writer: &mut W) -> WireWriteResult {
         (*self as u8).write(writer).await?;
         Ok(())
     }

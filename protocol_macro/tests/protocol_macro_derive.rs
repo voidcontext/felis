@@ -1,16 +1,15 @@
+use felis_protocol::{WireRead, WireWrite};
+use felis_protocol_macro::{WireRead, WireWrite};
 use pretty_assertions::assert_eq;
 
-use felis_command::*;
-use felis_command_macro::*;
-
-#[derive(Debug, PartialEq, ReadWire, WriteWire)]
+#[derive(Debug, PartialEq, WireRead, WireWrite)]
 enum Command {
     NoOp,
     Unnamed(String, usize),
     Named { number: u16, wrapped: Wrapped },
 }
 
-#[derive(Debug, PartialEq, ReadWire, WriteWire)]
+#[derive(Debug, PartialEq, WireRead, WireWrite)]
 struct Wrapped {
     number: usize,
     message: String,

@@ -198,8 +198,8 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "clap",
- "felis-command",
- "felis-command-macro",
+ "felis-protocol",
+ "felis-protocol-macro",
  "pretty_assertions",
  "signal-hook",
  "tempfile",
@@ -209,7 +209,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "felis-command"
+name = "felis-protocol"
 version = "0.1.0"
 dependencies = [
  "async-trait",
@@ -219,10 +219,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "felis-command-macro"
+name = "felis-protocol-macro"
 version = "0.1.0"
 dependencies = [
- "felis-command",
+ "felis-protocol",
  "pretty_assertions",
  "proc-macro2",
  "quote",

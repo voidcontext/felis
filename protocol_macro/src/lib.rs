@@ -3,7 +3,7 @@ use proc_macro2::Span;
 use quote::quote;
 use syn::DeriveInput;
 
-#[proc_macro_derive(WriteWire)]
+#[proc_macro_derive(WireWrite)]
 pub fn write_wire_derive(item: TokenStream) -> TokenStream {
     let cloned = item.clone();
     let input_parsed = syn::parse_macro_input!(cloned as DeriveInput);
@@ -19,7 +19,7 @@ pub fn write_wire_derive(item: TokenStream) -> TokenStream {
     }
 }
 
-#[proc_macro_derive(ReadWire)]
+#[proc_macro_derive(WireRead)]
 pub fn read_wire_derive(item: TokenStream) -> TokenStream {
     let cloned = item.clone();
     let input_parsed = syn::parse_macro_input!(cloned as DeriveInput);
@@ -45,8 +45,8 @@ fn derive_write_wire_struct(item: &syn::ItemStruct) -> proc_macro2::TokenStream 
     });
 
     quote! {
-        impl <W: AsyncWrite + Unpin + Send> felis_command::WriteWire<W> for #name {
-            fn write<'life0,'life1,'async_trait>(&'life0 self,writer: &'life1 mut W) ->  core::pin::Pin<Box<dyn core::future::Future<Output = felis_command::WriteResult> + core::marker::Send+'async_trait>>
+        impl <W: tokio::io::AsyncWrite + Unpin + Send> felis_protocol::WireWrite<W> for #name {
+            fn write<'life0,'life1,'async_trait>(&'life0 self,writer: &'life1 mut W) ->  core::pin::Pin<Box<dyn core::future::Future<Output = felis_protocol::WireWriteResult> + core::marker::Send+'async_trait>>
             where 'life0:'async_trait,'life1:'async_trait,Self:'async_trait
             {
                 Box::pin(async {
@@ -75,8 +75,8 @@ fn derive_read_wire_struct(item: &syn::ItemStruct) -> proc_macro2::TokenStream {
     let name = item.ident.clone();
 
     quote! {
-        impl <R: tokio::io::AsyncRead + Unpin + Send> felis_command::ReadWire<R> for #name {
-            fn read<'life0,'async_trait>(reader: &'life0 mut R) ->  core::pin::Pin<Box<dyn core::future::Future<Output = felis_command::ReadResult<Box<Self> > > + core::marker::Send+'async_trait>>
+        impl <R: tokio::io::AsyncRead + Unpin + Send> felis_protocol::WireRead<R> for #name {
+            fn read<'life0,'async_trait>(reader: &'life0 mut R) ->  core::pin::Pin<Box<dyn core::future::Future<Output = felis_protocol::WireReadResult<Box<Self> > > + core::marker::Send+'async_trait>>
             where 'life0:'async_trait,Self:'async_trait
             {
                 Box::pin(async {
@@ -141,8 +141,8 @@ fn derive_write_wire_enum(item: &syn::ItemEnum) -> proc_macro2::TokenStream {
     });
 
     quote! {
-        impl <W: tokio::io::AsyncWrite + Unpin + Send> felis_command::WriteWire<W> for #name {
-            fn write<'life0,'life1,'async_trait>(&'life0 self,writer: &'life1 mut W) ->  core::pin::Pin<Box<dyn core::future::Future<Output = felis_command::WriteResult> + core::marker::Send+'async_trait>>
+        impl <W: tokio::io::AsyncWrite + Unpin + Send> felis_protocol::WireWrite<W> for #name {
+            fn write<'life0,'life1,'async_trait>(&'life0 self,writer: &'life1 mut W) ->  core::pin::Pin<Box<dyn core::future::Future<Output = felis_protocol::WireWriteResult> + core::marker::Send+'async_trait>>
             where 'life0:'async_trait,'life1:'async_trait,Self:'async_trait
             {
                 Box::pin(async move {
@@ -208,8 +208,8 @@ fn derive_read_wire_enum(item: &syn::ItemEnum) -> proc_macro2::TokenStream {
         }
     });
     quote! {
-        impl <R: tokio::io::AsyncRead + Unpin + Send> felis_command::ReadWire<R> for #name {
-            fn read<'life0,'async_trait>(reader: &'life0 mut R) ->  core::pin::Pin<Box<dyn core::future::Future<Output = felis_command::ReadResult<Box<Self> > > + core::marker::Send+'async_trait>>
+        impl <R: tokio::io::AsyncRead + Unpin + Send> felis_protocol::WireRead<R> for #name {
+            fn read<'life0,'async_trait>(reader: &'life0 mut R) ->  core::pin::Pin<Box<dyn core::future::Future<Output = felis_protocol::WireReadResult<Box<Self> > > + core::marker::Send+'async_trait>>
             where 'life0:'async_trait,Self:'async_trait
             {
                 Box::pin(async {
@@ -217,7 +217,7 @@ fn derive_read_wire_enum(item: &syn::ItemEnum) -> proc_macro2::TokenStream {
 
                     let enum_variant = match ordinal {
                         #(#variant_cases)*
-                        _ => Err(WireFormatReadError::UnexpectedError {message: format!("Couldn't create enum from ordinal {ordinal}")} )
+                        _ => Err(felis_protocol::WireReadError::UnexpectedError {message: format!("Couldn't create enum from ordinal {ordinal}")} )
                     };
 
                     enum_variant.map(Box::new)

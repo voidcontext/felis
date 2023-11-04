@@ -1,19 +1,14 @@
 [package]
-name = "felis-command-macro"
+name = "felis-protocol"
 version = "0.1.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
-[lib]
-proc_macro = true
-
 [dependencies]
-felis-command = { path = "../command" }
-syn = {version = "2.0.38", features = ["full"]}
-quote = "1.0.33"
-proc-macro2 = "1.0.69"
+thiserror = "1.0.50"
 tokio = {version = "1.33.0", features = ["io-util"]}
+async-trait = "0.1.74"
 
 [dev-dependencies]
 pretty_assertions = "1.4.0"

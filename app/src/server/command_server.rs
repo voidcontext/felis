@@ -1,4 +1,4 @@
-use felis_command::{ReadWire, WriteWire};
+use felis_protocol::{WireRead, WireWrite};
 use tokio::{
     io::{AsyncRead, AsyncWrite},
     process,
