@@ -1,6 +1,6 @@
-use felis::command::Shutdown;
 use felis::server::executor;
 use felis::server::{self, UnixSocket};
+use felis::Command;
 use felis::Result;
 use felis_command::WriteWire;
 use signal_hook::consts::{SIGINT, SIGQUIT, SIGTERM};
@@ -13,7 +13,7 @@ async fn signal_handler(mut signals: SignalsInfo, socket_path: &str) {
         match signal {
             SIGTERM | SIGINT | SIGQUIT => {
                 let mut socket = UnixStream::connect(socket_path).await.unwrap();
-                Shutdown.write(&mut socket).await.unwrap();
+                Command::Shutdown.write(&mut socket).await.unwrap();
                 break;
             }
             _ => unreachable!(),

@@ -9,7 +9,7 @@ use tokio::process::Command;
 
 use async_trait::async_trait;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 pub enum Flag {
     NoOp = 0b00,
     DryRun = 0b01,
@@ -41,9 +41,9 @@ impl<W: AsyncWrite + Unpin + Send> WriteWire<W> for Flag {
 
 #[async_trait]
 pub trait Executor {
-    async fn execute(&self, cmd: &mut Command, flag: &Option<Flag>) -> Result<Output>;
+    async fn execute(&self, cmd: &mut Command, flag: &Flag) -> Result<Output>;
 
-    async fn execute_all(&self, cmds: &mut [Command], flag: &Option<Flag>) -> Result<Output> {
+    async fn execute_all(&self, cmds: &mut [Command], flag: &Flag) -> Result<Output> {
         let mut aggregated_ouput = Output {
             status: ExitStatus::default(),
             stdout: Vec::new(),
@@ -69,8 +69,8 @@ pub struct TokioRuntime;
 
 #[async_trait]
 impl Executor for TokioRuntime {
-    async fn execute(&self, cmd: &mut Command, flag: &Option<Flag>) -> Result<Output> {
-        if let Some(Flag::DryRun) = flag {
+    async fn execute(&self, cmd: &mut Command, flag: &Flag) -> Result<Output> {
+        if Flag::DryRun == *flag {
             return Err(FelisError::UnexpectedError {
                 message: String::from("The TokioRuntime executor doesn't support the DryRun Flag"),
             });
@@ -85,7 +85,7 @@ pub struct DryRun;
 
 #[async_trait]
 impl Executor for DryRun {
-    async fn execute(&self, cmd: &mut Command, _flag: &Option<Flag>) -> Result<Output> {
+    async fn execute(&self, cmd: &mut Command, _flag: &Flag) -> Result<Output> {
         Ok(Output {
             status: ExitStatus::default(),
             stdout: format!("{:?}\n", cmd.as_std()).as_bytes().to_vec(),
@@ -98,11 +98,10 @@ pub struct Configurable;
 
 #[async_trait]
 impl Executor for Configurable {
-    async fn execute(&self, cmd: &mut Command, flag: &Option<Flag>) -> Result<Output> {
-        if let Some(Flag::DryRun) = flag {
-            DryRun.execute(cmd, flag).await
-        } else {
-            TokioRuntime.execute(cmd, flag).await
+    async fn execute(&self, cmd: &mut Command, flag: &Flag) -> Result<Output> {
+        match flag {
+            Flag::DryRun => DryRun.execute(cmd, flag).await,
+            Flag::NoOp => TokioRuntime.execute(cmd, flag).await,
         }
     }
 }
@@ -112,12 +111,14 @@ mod test {
     use pretty_assertions::assert_eq;
     use tokio::process::Command;
 
+    use crate::server::executor::Flag;
+
     use super::{DryRun, Executor};
 
     #[tokio::test]
     async fn test_dry_run_executor_should_return_command_line() {
         let result = DryRun
-            .execute(Command::new("echo").arg("Hello World!"), &None)
+            .execute(Command::new("echo").arg("Hello World!"), &Flag::NoOp)
             .await
             .unwrap();
 
@@ -138,7 +139,7 @@ mod test {
         ls.arg("foobar");
 
         let mut cmd = vec![echo, ls];
-        let result = DryRun.execute_all(&mut cmd, &None).await.unwrap();
+        let result = DryRun.execute_all(&mut cmd, &Flag::NoOp).await.unwrap();
 
         let stdout = String::from_utf8(result.stdout).unwrap();
         assert_eq!(

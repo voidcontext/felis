@@ -1,13 +1,9 @@
 use std::println;
 
 use clap::{Parser, Subcommand};
-use felis::{
-    command::{self, Echo, OpenInHelix},
-    server::executor::Flag,
-    Result,
-};
+use felis::{server::executor::Flag, Result};
 use felis_command::{ReadWire, WriteWire};
-use tokio::{io::AsyncWriteExt, net::UnixStream};
+use tokio::net::UnixStream;
 
 #[derive(Parser, Debug)]
 struct Cli {
@@ -34,7 +30,7 @@ async fn main() -> Result<()> {
         Command::Echo { message } => {
             let message = message.join(" ");
 
-            Echo { message }.write(&mut socket).await?;
+            felis::Command::Echo(message).write(&mut socket).await?;
 
             let response = String::read(&mut socket).await?;
             println!("{response}");
@@ -46,7 +42,7 @@ async fn main() -> Result<()> {
                 Flag::NoOp
             };
 
-            let cmd = OpenInHelix {
+            let cmd = felis::Command::OpenInHelix {
                 flag,
                 kitty_tab_id: tab_id,
                 path,
@@ -57,7 +53,7 @@ async fn main() -> Result<()> {
             println!("{response}");
         }
         Command::Shutdown => {
-            socket.write_u8(command::SHUTDOWN).await?;
+            felis::Command::Shutdown.write(&mut socket).await?;
         }
     }
 

@@ -1,15 +1,12 @@
-use felis_command::{Command, ReadWire, WriteWire};
+use felis_command::{ReadWire, WriteWire};
 use tokio::{
-    io::{AsyncRead, AsyncReadExt, AsyncWrite},
+    io::{AsyncRead, AsyncWrite},
     process,
 };
 
-use crate::{command, Result};
+use crate::{Command, Result};
 
-use super::{
-    command_listener::CommandListener,
-    executor::{Executor, Flag},
-};
+use super::{command_listener::CommandListener, executor::Executor};
 
 pub async fn listen<R, C, E>(command_listener: &C, executor: &E)
 where
@@ -19,14 +16,14 @@ where
 {
     loop {
         match handle_connection(command_listener, executor).await {
-            Ok(Some(code)) if code == command::Shutdown::code() => break,
+            Ok(Command::Shutdown) => break,
             Ok(_) => (),
             Err(e) => println!("An error happened: {e:?}"),
         }
     }
 }
 
-async fn handle_connection<R, C, E>(command_listener: &C, executor: &E) -> Result<Option<u8>>
+async fn handle_connection<R, C, E>(command_listener: &C, executor: &E) -> Result<Command>
 where
     R: AsyncRead + AsyncWrite + std::marker::Unpin + std::marker::Send,
     C: CommandListener<R>,
@@ -34,37 +31,28 @@ where
 {
     match command_listener.accept().await {
         Ok(mut reader_writer) => {
-            let code = reader_writer.read_u8().await.ok();
-            if let Some(code) = code {
-                match code {
-                    command::SHUTDOWN => (),
-                    command::ECHO => {
-                        let cmd = command::Echo::read(&mut reader_writer).await?;
-                        cmd.message.write(&mut reader_writer).await?;
-                    }
-                    command::OPEN_IN_HELIX => {
-                        let cmd = command::OpenInHelix::read(&mut reader_writer).await?;
+            let cmd = *Command::read(&mut reader_writer).await?;
+            match &cmd {
+                Command::Shutdown => (),
+                Command::Echo(msg) => {
+                    msg.write(&mut reader_writer).await?;
+                }
+                Command::OpenInHelix {
+                    flag,
+                    kitty_tab_id,
+                    path,
+                } => {
+                    let mut commands = [
+                        kitty_send_text_cmd(*kitty_tab_id, r"\E"),
+                        kitty_send_text_cmd(*kitty_tab_id, &format!(":open {path}")),
+                        kitty_send_text_cmd(*kitty_tab_id, r"\r"),
+                    ];
 
-                        let flag = if cmd.flag as u8 & Flag::DryRun as u8 == 1 {
-                            Some(Flag::DryRun)
-                        } else {
-                            None
-                        };
-
-                        let mut commands = [
-                            kitty_send_text_cmd(cmd.kitty_tab_id, r"\E"),
-                            kitty_send_text_cmd(cmd.kitty_tab_id, &format!(":open {}", cmd.path)),
-                            kitty_send_text_cmd(cmd.kitty_tab_id, r"\r"),
-                        ];
-
-                        let output = executor.execute_all(&mut commands, &flag).await?;
-                        output.stdout.write(&mut reader_writer).await?;
-                    }
-                    _ => todo!(),
-                };
-            }
-
-            Ok(code)
+                    let output = executor.execute_all(&mut commands, flag).await?;
+                    output.stdout.write(&mut reader_writer).await?;
+                }
+            };
+            Ok(cmd)
         }
         Err(_) => todo!(),
     }
@@ -89,17 +77,14 @@ mod test {
 
     use pretty_assertions::assert_eq;
 
-    use crate::{
-        command,
-        server::{command_listener::stubs::CommandListenerStub, executor::DryRun},
-    };
+    use crate::server::{command_listener::stubs::CommandListenerStub, executor::DryRun};
 
     use super::listen;
 
     #[allow(clippy::assertions_on_constants)]
     #[tokio::test]
     async fn test_shutdown_command() {
-        let cl = CommandListenerStub::new(vec![command::SHUTDOWN]);
+        let cl = CommandListenerStub::new(0usize.to_be_bytes().to_vec());
 
         listen(&cl, &DryRun).await;
 
@@ -114,9 +99,9 @@ mod test {
         test_packet.extend_from_slice(message);
 
         let cl = CommandListenerStub::new({
-            let mut cmd = vec![command::ECHO];
+            let mut cmd = 1usize.to_be_bytes().to_vec();
             cmd.extend_from_slice(&test_packet);
-            cmd.push(command::SHUTDOWN);
+            cmd.extend_from_slice(0usize.to_be_bytes().as_slice());
             cmd
         });
 
@@ -133,10 +118,12 @@ mod test {
         let kitty_tab = 1;
         let dry_run_executor = 0;
 
-        let mut cmd_packet = vec![command::OPEN_IN_HELIX, dry_run_executor, kitty_tab];
+        let mut cmd_packet = 2usize.to_be_bytes().to_vec();
+        cmd_packet.push(dry_run_executor);
+        cmd_packet.push(kitty_tab);
         cmd_packet.extend_from_slice(&path.len().to_be_bytes());
         cmd_packet.extend_from_slice(path);
-        cmd_packet.push(command::SHUTDOWN);
+        cmd_packet.extend_from_slice(0usize.to_be_bytes().as_slice());
 
         let cl = CommandListenerStub::new(cmd_packet);
 

@@ -141,10 +141,6 @@ impl<R: AsyncRead + Unpin + Send, T: ReadWire<R> + Send> ReadWire<R> for Vec<T> 
     }
 }
 
-pub trait Command {
-    fn code() -> u8;
-}
-
 #[cfg(test)]
 mod test {
     use pretty_assertions::assert_eq;
