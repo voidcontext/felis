@@ -168,7 +168,30 @@ fn derive_read_wire_enum(item: &syn::ItemEnum) -> proc_macro2::TokenStream {
                         .iter()
                         .map(|named| named.ident.as_ref().unwrap());
                     let read_fields = named_fields.named.iter().map(|field| {
-                        let tpe = field.ty.clone();
+                        // We can't just use #tpe::read, as it would fail in case of Option<T>,
+                        // so we inject a path separator (colon2_token), essentially turning it to Option::<T>
+                        let tpe = match field.ty.clone() {
+                            syn::Type::Path(mut typepath) => {
+                                let mut segments: syn::punctuated::Punctuated<
+                                    syn::PathSegment,
+                                    syn::token::PathSep,
+                                > = syn::punctuated::Punctuated::default();
+                                for mut segment in typepath.path.segments {
+                                    if let syn::PathArguments::AngleBracketed(mut generic_args) =
+                                        segment.arguments
+                                    {
+                                        generic_args.colon2_token =
+                                            Some(syn::Token![::](Span::call_site()));
+                                        segment.arguments =
+                                            syn::PathArguments::AngleBracketed(generic_args);
+                                    }
+                                    segments.push(segment);
+                                }
+                                typepath.path.segments = segments;
+                                syn::Type::Path(typepath)
+                            }
+                            ty => ty,
+                        };
                         let field_name = field.ident.as_ref().unwrap();
                         quote! {
                             let #field_name = *#tpe::read(reader).await?;

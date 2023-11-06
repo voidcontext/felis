@@ -213,8 +213,20 @@ name = "felis-protocol"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "felis-protocol-core-macro",
  "pretty_assertions",
  "thiserror",
+ "tokio",
+]
+
+[[package]]
+name = "felis-protocol-core-macro"
+version = "0.1.0"
+dependencies = [
+ "pretty_assertions",
+ "proc-macro2",
+ "quote",
+ "syn",
  "tokio",
 ]
 

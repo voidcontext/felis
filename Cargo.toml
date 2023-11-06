@@ -3,6 +3,7 @@ resolver = "2"
 members = [
   "app",
   "protocol",
+  "protocol_core_macro",
   "protocol_macro"
 ]
 
