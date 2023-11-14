@@ -1,4 +1,4 @@
-use felis::server::executor;
+use felis::kitty_terminal::KittyTerminal;
 use felis::server::{self, UnixSocket};
 use felis::Command;
 use felis::Result;
@@ -32,7 +32,7 @@ async fn main() -> Result<()> {
     let signals_task = tokio::spawn(signal_handler(signals, socket_path));
 
     // run the server
-    server::listen(&socket, &executor::Configurable).await;
+    server::listen(&socket, &KittyTerminal::new()).await;
 
     // clean up
     handle.close();

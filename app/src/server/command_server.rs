@@ -1,21 +1,22 @@
+use std::path::Path;
+
 use felis_protocol::{WireRead, WireWrite};
-use tokio::{
-    io::{AsyncRead, AsyncWrite},
-    process,
+use kitty_remote_bindings::{
+    model::{self, OsWindows, WindowId},
+    Matcher,
 };
+use tokio::io::{AsyncRead, AsyncWrite};
 
-use crate::{Command, Result};
+use super::command_listener::CommandListener;
+use crate::{kitty_terminal::KittyTerminal, Command, FelisError, Response, Result};
 
-use super::{command_listener::CommandListener, executor::Executor};
-
-pub async fn listen<R, C, E>(command_listener: &C, executor: &E)
+pub async fn listen<R, C>(command_listener: &C, kitty: &KittyTerminal)
 where
     R: AsyncRead + AsyncWrite + std::marker::Unpin + std::marker::Send,
     C: CommandListener<R>,
-    E: Executor + std::marker::Sync,
 {
     loop {
-        match handle_connection(command_listener, executor).await {
+        match handle_connection(command_listener, kitty).await {
             Ok(Command::Shutdown) => break,
             Ok(_) => (),
             Err(e) => println!("An error happened: {e:?}"),
@@ -23,11 +24,10 @@ where
     }
 }
 
-async fn handle_connection<R, C, E>(command_listener: &C, executor: &E) -> Result<Command>
+async fn handle_connection<R, C>(command_listener: &C, kitty: &KittyTerminal) -> Result<Command>
 where
     R: AsyncRead + AsyncWrite + std::marker::Unpin + std::marker::Send,
     C: CommandListener<R>,
-    E: Executor + std::marker::Sync,
 {
     match command_listener.accept().await {
         Ok(mut reader_writer) => {
@@ -35,21 +35,27 @@ where
             match &cmd {
                 Command::Shutdown => (),
                 Command::Echo(msg) => {
-                    msg.write(&mut reader_writer).await?;
+                    Response::Message((*msg).clone())
+                        .write(&mut reader_writer)
+                        .await?;
                 }
-                Command::OpenInHelix {
-                    flag,
-                    kitty_tab_id,
-                    path,
-                } => {
-                    let mut commands = [
-                        kitty_send_text_cmd(*kitty_tab_id, r"\E"),
-                        kitty_send_text_cmd(*kitty_tab_id, &format!(":open {path}")),
-                        kitty_send_text_cmd(*kitty_tab_id, r"\r"),
-                    ];
+                Command::OpenInHelix { path, kitty_tab_id } => {
+                    let kitty_tab_id = if let Some(id) = kitty_tab_id {
+                        WindowId(*id)
+                    } else {
+                        let windows = kitty.ls().await?;
+                        find_workspace(windows, path)?
+                    };
 
-                    let output = executor.execute_all(&mut commands, flag).await?;
-                    output.stdout.write(&mut reader_writer).await?;
+                    kitty.send_text(Matcher::Id(kitty_tab_id), r"\E").await?;
+                    kitty
+                        .send_text(
+                            Matcher::Id(kitty_tab_id),
+                            &[format!(":open {}", path.to_string_lossy()).as_str(), r"\r"].join(""),
+                        )
+                        .await?;
+
+                    Response::Ack.write(&mut reader_writer).await?;
                 }
             };
             Ok(cmd)
@@ -58,85 +64,239 @@ where
     }
 }
 
-fn kitty_send_text_cmd(tab_id: u8, text: &str) -> process::Command {
-    let mut cmd = process::Command::new("kitty");
+fn find_workspace(windows: OsWindows, path: &Path) -> Result<WindowId> {
+    let active_window = windows.into_iter().find_map(|os_window| {
+        os_window.tabs.iter().find_map(|tab| {
+            tab.windows
+                .iter()
+                .find(|w| {
+                    w.foreground_processes
+                        .iter()
+                        .any(|process| is_helix_bin(process) && is_in_workspace(process, path))
+                })
+                .map(|w| w.id)
+        })
+    });
 
-    cmd.args([
-        "@",
-        "send-text",
-        "--match",
-        format!("id:{tab_id}").as_str(),
-        text,
-    ]);
+    active_window.ok_or_else(|| FelisError::UnexpectedError {
+        message: "Couldn't find active window".to_string(),
+    })
+}
 
-    cmd
+fn is_in_workspace(process: &model::Process, path: &Path) -> bool {
+    path.parent()
+        .map_or(false, |p| p.starts_with(process.cwd.as_str()))
+}
+
+fn is_helix_bin(process: &model::Process) -> bool {
+    process.cmdline.iter().any(|c| c.ends_with("bin/hx"))
 }
 
 #[cfg(test)]
 mod test {
 
-    use pretty_assertions::assert_eq;
+    use std::{
+        future,
+        os::unix::process::ExitStatusExt,
+        path::PathBuf,
+        process::{ExitStatus, Output},
+    };
 
-    use crate::server::{command_listener::stubs::CommandListenerStub, executor::DryRun};
+    use felis_protocol::{WireRead, WireWrite};
+    use kitty_remote_bindings::{model::WindowId, Ls, Matcher, MatcherExt, SendText};
+    use mockall::predicate::*;
+    use pretty_assertions::assert_eq;
+    use test_utils::ReaderWriterStub;
+
+    use crate::{
+        kitty_terminal::{test_fixture, KittyTerminal, MockExecutor},
+        server::command_listener::MockCommandListener,
+        Command, Response,
+    };
 
     use super::listen;
 
     #[allow(clippy::assertions_on_constants)]
     #[tokio::test]
     async fn test_shutdown_command() {
-        let cl = CommandListenerStub::new(0usize.to_be_bytes().to_vec());
+        let mut buf = Vec::new();
+        Command::Shutdown.write(&mut buf).await.unwrap();
 
-        listen(&cl, &DryRun).await;
+        let reader_writer_stub = ReaderWriterStub::new(buf);
+        let mut cl = MockCommandListener::new();
+        cl.expect_accept()
+            .returning(move || Box::pin(future::ready(Ok(reader_writer_stub.clone()))));
+
+        listen(&cl, &KittyTerminal::mock(MockExecutor::new())).await;
 
         assert!(true);
     }
 
     #[tokio::test]
     async fn test_echo_command() {
-        let message = b"test message";
-        let mut test_packet = vec![];
-        test_packet.extend_from_slice(&message.len().to_be_bytes());
-        test_packet.extend_from_slice(message);
+        let mut buf = Vec::new();
+        Command::Echo("test message".to_string())
+            .write(&mut buf)
+            .await
+            .unwrap();
+        Command::Shutdown.write(&mut buf).await.unwrap();
 
-        let cl = CommandListenerStub::new({
-            let mut cmd = 1usize.to_be_bytes().to_vec();
-            cmd.extend_from_slice(&test_packet);
-            cmd.extend_from_slice(0usize.to_be_bytes().as_slice());
-            cmd
+        let reader_writer_stub = ReaderWriterStub::new(buf);
+        let mut cl = MockCommandListener::new();
+        cl.expect_accept().returning({
+            let rws = reader_writer_stub.clone();
+            move || Box::pin(future::ready(Ok(rws.clone())))
         });
 
-        listen(&cl, &DryRun).await;
+        listen(&cl, &KittyTerminal::mock(MockExecutor::new())).await;
 
-        let written = cl.written();
-        let written = &*written.lock().unwrap();
-        assert_eq!(written, &test_packet);
+        let written_bytes = {
+            let written = reader_writer_stub.written();
+            let written_bytes = written.lock().unwrap();
+            (*written_bytes).clone()
+        }; // drop the non async aware mutex guard at the end of the scope
+
+        let response = Response::read(&mut written_bytes.as_slice())
+            .await
+            .expect("Couldn't read response");
+        assert_eq!(*response, Response::Message("test message".to_string()));
     }
 
     #[tokio::test]
-    async fn test_open_in_helix_command() {
-        let path = b"/path/to/some-file.txt";
-        let kitty_tab = 1;
-        let dry_run_executor = 0;
+    async fn test_open_in_helix_with_kitty_tab_id_command() {
+        let path = "/path/to/felis/src/lib.rs";
 
-        let mut cmd_packet = 2usize.to_be_bytes().to_vec();
-        cmd_packet.push(dry_run_executor);
-        cmd_packet.push(kitty_tab);
-        cmd_packet.extend_from_slice(&path.len().to_be_bytes());
-        cmd_packet.extend_from_slice(path);
-        cmd_packet.extend_from_slice(0usize.to_be_bytes().as_slice());
+        let mut buf = Vec::new();
+        Command::OpenInHelix {
+            kitty_tab_id: Some(1),
+            path: PathBuf::from(path),
+        }
+        .write(&mut buf)
+        .await
+        .unwrap();
+        Command::Shutdown.write(&mut buf).await.unwrap();
 
-        let cl = CommandListenerStub::new(cmd_packet);
+        let reader_writer_stub = ReaderWriterStub::new(buf);
+        let mut cl = MockCommandListener::new();
+        cl.expect_accept().returning({
+            let rws = reader_writer_stub.clone();
+            move || Box::pin(future::ready(Ok(rws.clone())))
+        });
 
-        let written = cl.written();
+        let mut executor = MockExecutor::new();
 
-        listen(&cl, &DryRun).await;
+        let mut cmd = SendText::new(r"\E".to_string());
+        cmd.matcher(Matcher::Id(WindowId(1)));
+        executor
+            .expect_send_text()
+            .times(1)
+            .with(eq(cmd))
+            .returning(|_| {
+                Ok(Output {
+                    status: ExitStatus::from_raw(0),
+                    stdout: test_fixture::LS_OUTPUT_JSON.as_bytes().to_vec(),
+                    stderr: Vec::new(),
+                })
+            });
+        let mut cmd = SendText::new(format!(r":open {path}\r"));
+        cmd.matcher(Matcher::Id(WindowId(1)));
+        executor
+            .expect_send_text()
+            .times(1)
+            .with(eq(cmd))
+            .returning(|_| {
+                Ok(Output {
+                    status: ExitStatus::from_raw(0),
+                    stdout: test_fixture::LS_OUTPUT_JSON.as_bytes().to_vec(),
+                    stderr: Vec::new(),
+                })
+            });
+        listen(&cl, &KittyTerminal::mock(executor)).await;
 
-        let expected = r#""kitty" "@" "send-text" "--match" "id:1" "\\E"
-"kitty" "@" "send-text" "--match" "id:1" ":open /path/to/some-file.txt"
-"kitty" "@" "send-text" "--match" "id:1" "\\r"
-"#;
+        let written_bytes = {
+            let written = reader_writer_stub.written();
+            let written_bytes = written.lock().unwrap();
+            (*written_bytes).clone()
+        }; // drop the non async aware mutex guard at the end of the scope
 
-        let written = (*written.lock().unwrap()).clone();
-        assert_eq!(String::from_utf8(written[8..].to_vec()).unwrap(), expected);
+        let response = Response::read(&mut written_bytes.as_slice())
+            .await
+            .expect("Couldn't read response");
+        assert_eq!(*response, Response::Ack);
+    }
+
+    #[tokio::test]
+    async fn test_open_in_helix_without_kitty_tab_id_command() {
+        let path = "/path/to/felis/src/lib.rs";
+
+        let mut buf = Vec::new();
+        Command::OpenInHelix {
+            kitty_tab_id: None,
+            path: PathBuf::from(path),
+        }
+        .write(&mut buf)
+        .await
+        .unwrap();
+        Command::Shutdown.write(&mut buf).await.unwrap();
+
+        let mut executor = MockExecutor::new();
+        executor
+            .expect_ls()
+            .times(1)
+            .with(eq(Ls::new()))
+            .returning(|_| {
+                Ok(Output {
+                    status: ExitStatus::from_raw(0),
+                    stdout: test_fixture::LS_OUTPUT_JSON.as_bytes().to_vec(),
+                    stderr: Vec::new(),
+                })
+            });
+
+        let mut cmd = SendText::new(r"\E".to_string());
+        cmd.matcher(Matcher::Id(WindowId(1)));
+        executor
+            .expect_send_text()
+            .times(1)
+            .with(eq(cmd))
+            .returning(|_| {
+                Ok(Output {
+                    status: ExitStatus::from_raw(0),
+                    stdout: test_fixture::LS_OUTPUT_JSON.as_bytes().to_vec(),
+                    stderr: Vec::new(),
+                })
+            });
+        let mut cmd = SendText::new(format!(r":open {path}\r"));
+        cmd.matcher(Matcher::Id(WindowId(1)));
+        executor
+            .expect_send_text()
+            .times(1)
+            .with(eq(cmd))
+            .returning(|_| {
+                Ok(Output {
+                    status: ExitStatus::from_raw(0),
+                    stdout: test_fixture::LS_OUTPUT_JSON.as_bytes().to_vec(),
+                    stderr: Vec::new(),
+                })
+            });
+
+        let reader_writer_stub = ReaderWriterStub::new(buf);
+        let mut cl = MockCommandListener::new();
+        cl.expect_accept().returning({
+            let rws = reader_writer_stub.clone();
+            move || Box::pin(future::ready(Ok(rws.clone())))
+        });
+
+        listen(&cl, &KittyTerminal::mock(executor)).await;
+
+        let written_bytes = {
+            let written = reader_writer_stub.written();
+            let written_bytes = written.lock().unwrap();
+            (*written_bytes).clone()
+        }; // drop the non async aware mutex guard at the end of the scope
+
+        let response = Response::read(&mut written_bytes.as_slice())
+            .await
+            .expect("Couldn't read response");
+        assert_eq!(*response, Response::Ack);
     }
 }

@@ -1,7 +1,7 @@
-use std::println;
+use std::{path::PathBuf, println};
 
 use clap::{Parser, Subcommand};
-use felis::{server::executor::Flag, Result};
+use felis::Result;
 use felis_protocol::{WireRead, WireWrite};
 use tokio::net::UnixStream;
 
@@ -9,14 +9,12 @@ use tokio::net::UnixStream;
 struct Cli {
     #[command(subcommand)]
     command: Command,
-    #[arg(long, default_value_t = false)]
-    dry_run: bool,
 }
 
 #[derive(Debug, Subcommand)]
 enum Command {
     Echo { message: Vec<String> },
-    OpenInHelix { tab_id: u8, path: String },
+    OpenInHelix { path: PathBuf, tab_id: Option<u32> },
     Shutdown,
 }
 
@@ -36,14 +34,7 @@ async fn main() -> Result<()> {
             println!("{response}");
         }
         Command::OpenInHelix { tab_id, path } => {
-            let flag = if cli.dry_run {
-                Flag::DryRun
-            } else {
-                Flag::NoOp
-            };
-
             let cmd = felis::Command::OpenInHelix {
-                flag,
                 kitty_tab_id: tab_id,
                 path,
             };

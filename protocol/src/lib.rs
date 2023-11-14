@@ -1,5 +1,5 @@
-use std::io;
 use std::string::FromUtf8Error;
+use std::{io, path::PathBuf};
 
 use async_trait::async_trait;
 use felis_protocol_core_macro::wire_protocol_for;
@@ -135,6 +135,21 @@ impl<R: AsyncRead + Unpin + Send, T: WireRead<R> + Send> WireRead<R> for Vec<T> 
         }
 
         Ok(Box::new(result))
+    }
+}
+
+#[async_trait]
+impl<W: AsyncWrite + Unpin + Send> WireWrite<W> for PathBuf {
+    async fn write(&self, writer: &mut W) -> WireWriteResult {
+        self.to_string_lossy().to_string().write(writer).await
+    }
+}
+
+#[async_trait]
+impl<R: AsyncRead + Unpin + Send> WireRead<R> for PathBuf {
+    async fn read(reader: &mut R) -> WireReadResult<Box<Self>> {
+        let str = *String::read(reader).await?;
+        Ok(Box::new(PathBuf::from(str)))
     }
 }
 

@@ -38,7 +38,7 @@
     in rec {
       crate = nru.mkCrate (commonArgs
         // {
-          doCheck = false;
+          doCheck = true;
 
           # # Shell completions
           # COMPLETIONS_TARGET="target/";
@@ -52,9 +52,7 @@
       checks = nru.mkChecks (commonArgs
         // {
           inherit crate;
-          nextest = true;
-          # TODO: remove this once there isn't dead code
-          cargoClippyExtraArgs = "--all-targets -- -Dwarnings -W clippy::pedantic -A dead_code";
+          # nextest = true;
         });
     };
     outputs = flake-utils.lib.eachDefaultSystem (system: let
@@ -66,7 +64,7 @@
 
       felis = mkFelis pkgs;
     in {
-      checks = builtins.removeAttrs felis.checks ["cargo-nextest"];
+      checks = felis.checks;
 
       packages.default = felis.crate;
 

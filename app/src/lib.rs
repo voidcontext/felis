@@ -1,9 +1,9 @@
+pub mod kitty_terminal;
 pub mod server;
 
-use crate::server::executor::Flag;
 use felis_protocol::{WireReadError, WireWriteError};
 use felis_protocol_macro::{WireRead, WireWrite};
-use std::{io::Error, num::TryFromIntError, string::FromUtf8Error};
+use std::{io::Error, num::TryFromIntError, path::PathBuf, string::FromUtf8Error};
 use thiserror::Error;
 
 pub type Result<T> = std::result::Result<T, FelisError>;
@@ -22,6 +22,8 @@ pub enum FelisError {
     WireFormatWrite(#[from] WireWriteError),
     #[error("unexpected error: {message}")]
     UnexpectedError { message: String },
+    #[error("kitty error")]
+    KittyError(#[from] kitty_remote_bindings::Error),
 }
 
 #[derive(WireRead, WireWrite)]
@@ -29,8 +31,13 @@ pub enum Command {
     Shutdown,
     Echo(String),
     OpenInHelix {
-        flag: Flag,
-        kitty_tab_id: u8,
-        path: String,
+        path: PathBuf,
+        kitty_tab_id: Option<u32>,
     },
+}
+
+#[derive(Debug, WireRead, WireWrite, PartialEq)]
+pub enum Response {
+    Ack,
+    Message(String),
 }
