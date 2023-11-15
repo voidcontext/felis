@@ -5,7 +5,7 @@ use std::process::Output;
 use crate::Result;
 use async_trait::async_trait;
 use kitty_remote_bindings::model::OsWindows;
-use kitty_remote_bindings::{CommandOutput, Ls, Matcher, MatcherExt, SendText};
+use kitty_remote_bindings::{CommandOutput, FocusWindow, Ls, Matcher, MatcherExt, SendText};
 
 #[cfg(test)]
 use mockall::automock;
@@ -15,6 +15,7 @@ use mockall::automock;
 pub(crate) trait Executor {
     async fn ls(&self, ls: &Ls) -> io::Result<Output>;
     async fn send_text(&self, send_text: &SendText) -> io::Result<Output>;
+    async fn focus_window(&self, focus_window: &FocusWindow) -> io::Result<Output>;
 }
 
 struct TokioExecutor;
@@ -27,6 +28,12 @@ impl Executor for TokioExecutor {
     }
     async fn send_text(&self, send_text: &SendText) -> io::Result<Output> {
         tokio::process::Command::from(Into::<std::process::Command>::into(send_text))
+            .output()
+            .await
+    }
+
+    async fn focus_window(&self, focus_window: &FocusWindow) -> io::Result<Output> {
+        tokio::process::Command::from(Into::<std::process::Command>::into(focus_window))
             .output()
             .await
     }
@@ -62,6 +69,16 @@ impl KittyTerminal {
         let mut cmd = SendText::new(text.to_string());
         cmd.matcher(matcher);
         let output = self.executor.send_text(&cmd).await?;
+
+        SendText::result(&output)?;
+
+        Ok(())
+    }
+
+    pub async fn focus_window(&self, matcher: Matcher) -> Result<()> {
+        let mut cmd = FocusWindow::new();
+        cmd.matcher(matcher);
+        let output = self.executor.focus_window(&cmd).await?;
 
         SendText::result(&output)?;
 

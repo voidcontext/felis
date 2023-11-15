@@ -47,6 +47,7 @@ where
                         find_workspace(&windows, path)?
                     };
 
+                    kitty.focus_window(Matcher::Id(kitty_window_id)).await?;
                     kitty.send_text(Matcher::Id(kitty_window_id), r"\E").await?;
                     kitty
                         .send_text(
@@ -140,7 +141,7 @@ mod test {
     };
 
     use felis_protocol::{WireRead, WireWrite};
-    use kitty_remote_bindings::{model::WindowId, Ls, Matcher, MatcherExt, SendText};
+    use kitty_remote_bindings::{model::WindowId, FocusWindow, Ls, Matcher, MatcherExt, SendText};
     use mockall::predicate::*;
     use pretty_assertions::assert_eq;
     use test_utils::ReaderWriterStub;
@@ -199,6 +200,52 @@ mod test {
         assert_eq!(*response, Response::Message("test message".to_string()));
     }
 
+    fn expect_ls_success(executor: &mut MockExecutor) {
+        executor
+            .expect_ls()
+            .times(1)
+            .with(eq(Ls::new()))
+            .returning(|_| {
+                Ok(Output {
+                    status: ExitStatus::from_raw(0),
+                    stdout: test_fixture::LS_OUTPUT_JSON.as_bytes().to_vec(),
+                    stderr: Vec::new(),
+                })
+            });
+    }
+
+    fn expect_send_text_success(executor: &mut MockExecutor, text: &str, window_id: WindowId) {
+        let mut cmd = SendText::new(text.to_string());
+        cmd.matcher(Matcher::Id(window_id));
+        executor
+            .expect_send_text()
+            .times(1)
+            .with(eq(cmd))
+            .returning(|_| {
+                Ok(Output {
+                    status: ExitStatus::from_raw(0),
+                    stdout: Vec::new(),
+                    stderr: Vec::new(),
+                })
+            });
+    }
+
+    fn expect_focus_window_succes(executor: &mut MockExecutor, window_id: WindowId) {
+        let mut cmd = FocusWindow::new();
+        cmd.matcher(Matcher::Id(window_id));
+        executor
+            .expect_focus_window()
+            .times(1)
+            .with(eq(cmd))
+            .returning(|_| {
+                Ok(Output {
+                    status: ExitStatus::from_raw(0),
+                    stdout: Vec::new(),
+                    stderr: Vec::new(),
+                })
+            });
+    }
+
     #[tokio::test]
     async fn test_open_in_helix_with_kitty_tab_id_command() {
         let path = "/path/to/felis/src/lib.rs";
@@ -222,32 +269,14 @@ mod test {
 
         let mut executor = MockExecutor::new();
 
-        let mut cmd = SendText::new(r"\E".to_string());
-        cmd.matcher(Matcher::Id(WindowId(1)));
-        executor
-            .expect_send_text()
-            .times(1)
-            .with(eq(cmd))
-            .returning(|_| {
-                Ok(Output {
-                    status: ExitStatus::from_raw(0),
-                    stdout: test_fixture::LS_OUTPUT_JSON.as_bytes().to_vec(),
-                    stderr: Vec::new(),
-                })
-            });
-        let mut cmd = SendText::new(format!(r":open {path}\r"));
-        cmd.matcher(Matcher::Id(WindowId(1)));
-        executor
-            .expect_send_text()
-            .times(1)
-            .with(eq(cmd))
-            .returning(|_| {
-                Ok(Output {
-                    status: ExitStatus::from_raw(0),
-                    stdout: test_fixture::LS_OUTPUT_JSON.as_bytes().to_vec(),
-                    stderr: Vec::new(),
-                })
-            });
+        expect_focus_window_succes(&mut executor, WindowId(1));
+        expect_send_text_success(&mut executor, r"\E", WindowId(1));
+        expect_send_text_success(
+            &mut executor,
+            format!(r":open {path}\r").as_str(),
+            WindowId(1),
+        );
+
         listen(&cl, &KittyTerminal::mock(executor)).await;
 
         let written_bytes = {
@@ -277,44 +306,14 @@ mod test {
         Command::Shutdown.write(&mut buf).await.unwrap();
 
         let mut executor = MockExecutor::new();
-        executor
-            .expect_ls()
-            .times(1)
-            .with(eq(Ls::new()))
-            .returning(|_| {
-                Ok(Output {
-                    status: ExitStatus::from_raw(0),
-                    stdout: test_fixture::LS_OUTPUT_JSON.as_bytes().to_vec(),
-                    stderr: Vec::new(),
-                })
-            });
-
-        let mut cmd = SendText::new(r"\E".to_string());
-        cmd.matcher(Matcher::Id(WindowId(1)));
-        executor
-            .expect_send_text()
-            .times(1)
-            .with(eq(cmd))
-            .returning(|_| {
-                Ok(Output {
-                    status: ExitStatus::from_raw(0),
-                    stdout: test_fixture::LS_OUTPUT_JSON.as_bytes().to_vec(),
-                    stderr: Vec::new(),
-                })
-            });
-        let mut cmd = SendText::new(format!(r":open {path}\r"));
-        cmd.matcher(Matcher::Id(WindowId(1)));
-        executor
-            .expect_send_text()
-            .times(1)
-            .with(eq(cmd))
-            .returning(|_| {
-                Ok(Output {
-                    status: ExitStatus::from_raw(0),
-                    stdout: test_fixture::LS_OUTPUT_JSON.as_bytes().to_vec(),
-                    stderr: Vec::new(),
-                })
-            });
+        expect_ls_success(&mut executor);
+        expect_send_text_success(&mut executor, r"\E", WindowId(1));
+        expect_send_text_success(
+            &mut executor,
+            format!(r":open {path}\r").as_str(),
+            WindowId(1),
+        );
+        expect_focus_window_succes(&mut executor, WindowId(1));
 
         let reader_writer_stub = ReaderWriterStub::new(buf);
         let mut cl = MockCommandListener::new();
@@ -352,44 +351,14 @@ mod test {
         Command::Shutdown.write(&mut buf).await.unwrap();
 
         let mut executor = MockExecutor::new();
-        executor
-            .expect_ls()
-            .times(1)
-            .with(eq(Ls::new()))
-            .returning(|_| {
-                Ok(Output {
-                    status: ExitStatus::from_raw(0),
-                    stdout: test_fixture::LS_OUTPUT_JSON.as_bytes().to_vec(),
-                    stderr: Vec::new(),
-                })
-            });
-
-        let mut cmd = SendText::new(r"\E".to_string());
-        cmd.matcher(Matcher::Id(WindowId(1)));
-        executor
-            .expect_send_text()
-            .times(1)
-            .with(eq(cmd))
-            .returning(|_| {
-                Ok(Output {
-                    status: ExitStatus::from_raw(0),
-                    stdout: test_fixture::LS_OUTPUT_JSON.as_bytes().to_vec(),
-                    stderr: Vec::new(),
-                })
-            });
-        let mut cmd = SendText::new(format!(r":open {path}\r"));
-        cmd.matcher(Matcher::Id(WindowId(1)));
-        executor
-            .expect_send_text()
-            .times(1)
-            .with(eq(cmd))
-            .returning(|_| {
-                Ok(Output {
-                    status: ExitStatus::from_raw(0),
-                    stdout: test_fixture::LS_OUTPUT_JSON.as_bytes().to_vec(),
-                    stderr: Vec::new(),
-                })
-            });
+        expect_ls_success(&mut executor);
+        expect_send_text_success(&mut executor, r"\E", WindowId(1));
+        expect_send_text_success(
+            &mut executor,
+            format!(r":open {path}\r").as_str(),
+            WindowId(1),
+        );
+        expect_focus_window_succes(&mut executor, WindowId(1));
 
         let reader_writer_stub = ReaderWriterStub::new(buf);
         let mut cl = MockCommandListener::new();
