@@ -328,9 +328,9 @@ checksum = "af150ab688ff2122fcef229be89cb50dd66af9e01a4ff320cc137eecc9bacc38"
 
 [[package]]
 name = "kitty-remote-bindings"
-version = "0.2.0"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bc7558f142c6734a3531276ccab6b861c4804116b44a8861634d515360882d19"
+checksum = "f4e9487e2da373e8ab4849fffb108aa5f06c5f457cbd075b53df20489b3ba991"
 dependencies = [
  "serde",
  "serde_json",

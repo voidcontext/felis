@@ -23,7 +23,7 @@ clap = {version = "4.4.7", features = ["derive"]}
 signal-hook = "0.3.17"
 felis-protocol = { path = "../protocol" }
 felis-protocol-macro = { path = "../protocol_macro" }
-kitty-remote-bindings = {version = "0.2.0"}
+kitty-remote-bindings = { version = "0.3.0"}
 
 [dev-dependencies]
 pretty_assertions = "1.4.0"
