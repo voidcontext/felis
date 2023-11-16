@@ -30,6 +30,7 @@ pub enum FelisError {
 pub enum Command {
     Shutdown,
     Echo(String),
+    GetActiveFocusedWindow,
     OpenInHelix {
         path: PathBuf,
         kitty_tab_id: Option<u32>,
@@ -40,4 +41,5 @@ pub enum Command {
 pub enum Response {
     Ack,
     Message(String),
+    WindowId(u32),
 }

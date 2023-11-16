@@ -14,6 +14,7 @@ struct Cli {
 #[derive(Debug, Subcommand)]
 enum Command {
     Echo { message: Vec<String> },
+    GetActiveFocusedWindow,
     OpenInHelix { path: PathBuf, tab_id: Option<u32> },
     Shutdown,
 }
@@ -27,11 +28,12 @@ async fn main() -> Result<()> {
     match cli.command {
         Command::Echo { message } => {
             let message = message.join(" ");
-
             felis::Command::Echo(message).write(&mut socket).await?;
-
-            let response = String::read(&mut socket).await?;
-            println!("{response}");
+        }
+        Command::GetActiveFocusedWindow => {
+            felis::Command::GetActiveFocusedWindow
+                .write(&mut socket)
+                .await?;
         }
         Command::OpenInHelix { tab_id, path } => {
             let cmd = felis::Command::OpenInHelix {
@@ -39,13 +41,18 @@ async fn main() -> Result<()> {
                 path,
             };
             cmd.write(&mut socket).await?;
-
-            let response = String::read(&mut socket).await?;
-            println!("{response}");
         }
         Command::Shutdown => {
             felis::Command::Shutdown.write(&mut socket).await?;
         }
+    }
+
+    let response = felis::Response::read(&mut socket).await?;
+
+    match *response {
+        felis::Response::Ack => (),
+        felis::Response::Message(msg) => println!("{msg}"),
+        felis::Response::WindowId(id) => println!("{id}"),
     }
 
     Ok(())

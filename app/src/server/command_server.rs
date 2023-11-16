@@ -39,6 +39,18 @@ where
                         .write(&mut reader_writer)
                         .await?;
                 }
+                Command::GetActiveFocusedWindow => {
+                    let windows = kitty.ls().await?;
+                    let window = focused_active_window(&windows).ok_or_else(|| {
+                        FelisError::UnexpectedError {
+                            message: "Couldn't find active focused window".to_string(),
+                        }
+                    })?;
+
+                    Response::WindowId(window.id.0)
+                        .write(&mut reader_writer)
+                        .await?;
+                }
                 Command::OpenInHelix { path, kitty_tab_id } => {
                     let kitty_window_id = if let Some(id) = kitty_tab_id {
                         WindowId(*id)
@@ -52,7 +64,7 @@ where
                     kitty
                         .send_text(
                             Matcher::Id(kitty_window_id),
-                            &[format!(":open {}", path.to_string_lossy()).as_str(), r"\r"].join(""),
+                            format!(r":open {}\r", path.to_string_lossy()).as_str(),
                         )
                         .await?;
 
@@ -154,17 +166,37 @@ mod test {
 
     use super::listen;
 
+    fn stub_command_listener(
+        buf: Vec<u8>,
+    ) -> (MockCommandListener<ReaderWriterStub>, ReaderWriterStub) {
+        let reader_writer_stub = ReaderWriterStub::new(buf);
+        let mut cl = MockCommandListener::new();
+        cl.expect_accept().returning({
+            let rws = reader_writer_stub.clone();
+            move || Box::pin(future::ready(Ok(rws.clone())))
+        });
+
+        (cl, reader_writer_stub)
+    }
+
+    async fn read_response(reader_writer_stub: &ReaderWriterStub) -> crate::Result<Box<Response>> {
+        let written_bytes = {
+            let written = reader_writer_stub.written();
+            let written_bytes = written.lock().unwrap();
+            (*written_bytes).clone()
+        }; // drop the non async aware mutex guard at the end of the scope
+
+        let response = Response::read(&mut written_bytes.as_slice()).await?;
+        Ok(response)
+    }
+
     #[allow(clippy::assertions_on_constants)]
     #[tokio::test]
     async fn test_shutdown_command() {
         let mut buf = Vec::new();
         Command::Shutdown.write(&mut buf).await.unwrap();
 
-        let reader_writer_stub = ReaderWriterStub::new(buf);
-        let mut cl = MockCommandListener::new();
-        cl.expect_accept()
-            .returning(move || Box::pin(future::ready(Ok(reader_writer_stub.clone()))));
-
+        let (cl, _) = stub_command_listener(buf);
         listen(&cl, &KittyTerminal::mock(MockExecutor::new())).await;
 
         assert!(true);
@@ -179,22 +211,10 @@ mod test {
             .unwrap();
         Command::Shutdown.write(&mut buf).await.unwrap();
 
-        let reader_writer_stub = ReaderWriterStub::new(buf);
-        let mut cl = MockCommandListener::new();
-        cl.expect_accept().returning({
-            let rws = reader_writer_stub.clone();
-            move || Box::pin(future::ready(Ok(rws.clone())))
-        });
-
+        let (cl, reader_writer_stub) = stub_command_listener(buf);
         listen(&cl, &KittyTerminal::mock(MockExecutor::new())).await;
 
-        let written_bytes = {
-            let written = reader_writer_stub.written();
-            let written_bytes = written.lock().unwrap();
-            (*written_bytes).clone()
-        }; // drop the non async aware mutex guard at the end of the scope
-
-        let response = Response::read(&mut written_bytes.as_slice())
+        let response = read_response(&reader_writer_stub)
             .await
             .expect("Couldn't read response");
         assert_eq!(*response, Response::Message("test message".to_string()));
@@ -247,6 +267,27 @@ mod test {
     }
 
     #[tokio::test]
+    async fn test_get_active_focused_window_command() {
+        let mut buf = Vec::new();
+        Command::GetActiveFocusedWindow
+            .write(&mut buf)
+            .await
+            .unwrap();
+        Command::Shutdown.write(&mut buf).await.unwrap();
+
+        let (cl, reader_writer_stub) = stub_command_listener(buf);
+        let mut executor = MockExecutor::new();
+        expect_ls_success(&mut executor);
+
+        listen(&cl, &KittyTerminal::mock(executor)).await;
+
+        let response = read_response(&reader_writer_stub)
+            .await
+            .expect("Couldn't read response");
+        assert_eq!(*response, Response::WindowId(2));
+    }
+
+    #[tokio::test]
     async fn test_open_in_helix_with_kitty_tab_id_command() {
         let path = "/path/to/felis/src/lib.rs";
 
@@ -260,15 +301,8 @@ mod test {
         .unwrap();
         Command::Shutdown.write(&mut buf).await.unwrap();
 
-        let reader_writer_stub = ReaderWriterStub::new(buf);
-        let mut cl = MockCommandListener::new();
-        cl.expect_accept().returning({
-            let rws = reader_writer_stub.clone();
-            move || Box::pin(future::ready(Ok(rws.clone())))
-        });
-
+        let (cl, reader_writer_stub) = stub_command_listener(buf);
         let mut executor = MockExecutor::new();
-
         expect_focus_window_succes(&mut executor, WindowId(1));
         expect_send_text_success(&mut executor, r"\E", WindowId(1));
         expect_send_text_success(
@@ -279,13 +313,7 @@ mod test {
 
         listen(&cl, &KittyTerminal::mock(executor)).await;
 
-        let written_bytes = {
-            let written = reader_writer_stub.written();
-            let written_bytes = written.lock().unwrap();
-            (*written_bytes).clone()
-        }; // drop the non async aware mutex guard at the end of the scope
-
-        let response = Response::read(&mut written_bytes.as_slice())
+        let response = read_response(&reader_writer_stub)
             .await
             .expect("Couldn't read response");
         assert_eq!(*response, Response::Ack);
@@ -305,6 +333,8 @@ mod test {
         .unwrap();
         Command::Shutdown.write(&mut buf).await.unwrap();
 
+        let (cl, reader_writer_stub) = stub_command_listener(buf);
+
         let mut executor = MockExecutor::new();
         expect_ls_success(&mut executor);
         expect_send_text_success(&mut executor, r"\E", WindowId(1));
@@ -315,22 +345,9 @@ mod test {
         );
         expect_focus_window_succes(&mut executor, WindowId(1));
 
-        let reader_writer_stub = ReaderWriterStub::new(buf);
-        let mut cl = MockCommandListener::new();
-        cl.expect_accept().returning({
-            let rws = reader_writer_stub.clone();
-            move || Box::pin(future::ready(Ok(rws.clone())))
-        });
-
         listen(&cl, &KittyTerminal::mock(executor)).await;
 
-        let written_bytes = {
-            let written = reader_writer_stub.written();
-            let written_bytes = written.lock().unwrap();
-            (*written_bytes).clone()
-        }; // drop the non async aware mutex guard at the end of the scope
-
-        let response = Response::read(&mut written_bytes.as_slice())
+        let response = read_response(&reader_writer_stub)
             .await
             .expect("Couldn't read response");
         assert_eq!(*response, Response::Ack);
@@ -350,6 +367,8 @@ mod test {
         .unwrap();
         Command::Shutdown.write(&mut buf).await.unwrap();
 
+        let (cl, reader_writer_stub) = stub_command_listener(buf);
+
         let mut executor = MockExecutor::new();
         expect_ls_success(&mut executor);
         expect_send_text_success(&mut executor, r"\E", WindowId(1));
@@ -360,22 +379,9 @@ mod test {
         );
         expect_focus_window_succes(&mut executor, WindowId(1));
 
-        let reader_writer_stub = ReaderWriterStub::new(buf);
-        let mut cl = MockCommandListener::new();
-        cl.expect_accept().returning({
-            let rws = reader_writer_stub.clone();
-            move || Box::pin(future::ready(Ok(rws.clone())))
-        });
-
         listen(&cl, &KittyTerminal::mock(executor)).await;
 
-        let written_bytes = {
-            let written = reader_writer_stub.written();
-            let written_bytes = written.lock().unwrap();
-            (*written_bytes).clone()
-        }; // drop the non async aware mutex guard at the end of the scope
-
-        let response = Response::read(&mut written_bytes.as_slice())
+        let response = read_response(&reader_writer_stub)
             .await
             .expect("Couldn't read response");
         assert_eq!(*response, Response::Ack);
