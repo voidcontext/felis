@@ -3,7 +3,12 @@ pub mod server;
 
 use felis_protocol::{WireReadError, WireWriteError};
 use felis_protocol_macro::{WireRead, WireWrite};
-use std::{io::Error, num::TryFromIntError, path::PathBuf, string::FromUtf8Error};
+use std::{
+    io::Error,
+    num::TryFromIntError,
+    path::{PathBuf, StripPrefixError},
+    string::FromUtf8Error,
+};
 use thiserror::Error;
 
 pub type Result<T> = std::result::Result<T, FelisError>;
@@ -24,6 +29,8 @@ pub enum FelisError {
     UnexpectedError { message: String },
     #[error("kitty error")]
     KittyError(#[from] kitty_remote_bindings::Error),
+    #[error("strip prefix error")]
+    StripPrefixError(#[from] StripPrefixError),
 }
 
 #[derive(WireRead, WireWrite)]

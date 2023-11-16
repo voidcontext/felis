@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use felis_protocol::{WireRead, WireWrite};
 use kitty_remote_bindings::{
-    model::{self, OsWindows, WindowId},
+    model::{self, OsWindows, Window, WindowId},
     Matcher,
 };
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -52,19 +52,29 @@ where
                         .await?;
                 }
                 Command::OpenInHelix { path, kitty_tab_id } => {
-                    let kitty_window_id = if let Some(id) = kitty_tab_id {
-                        WindowId(*id)
+                    let windows = kitty.ls().await?;
+                    let kitty_window = if let Some(id) = kitty_tab_id {
+                        find_window_by_id(&windows, WindowId(*id)).ok_or_else(|| {
+                            FelisError::UnexpectedError {
+                                message: format!("Couldn't find window with id {id}"),
+                            }
+                        })?
                     } else {
-                        let windows = kitty.ls().await?;
                         find_workspace(&windows, path)?
                     };
 
-                    kitty.focus_window(Matcher::Id(kitty_window_id)).await?;
-                    kitty.send_text(Matcher::Id(kitty_window_id), r"\E").await?;
+                    let rel_path = if path.is_absolute() {
+                        path.strip_prefix(window_cwd(kitty_window))?
+                    } else {
+                        path
+                    };
+
+                    kitty.focus_window(Matcher::Id(kitty_window.id)).await?;
+                    kitty.send_text(Matcher::Id(kitty_window.id), r"\E").await?;
                     kitty
                         .send_text(
-                            Matcher::Id(kitty_window_id),
-                            format!(r":open {}\r", path.to_string_lossy()).as_str(),
+                            Matcher::Id(kitty_window.id),
+                            format!(r":open {}\r", rel_path.to_string_lossy()).as_str(),
                         )
                         .await?;
 
@@ -75,6 +85,15 @@ where
         }
         Err(_) => todo!(),
     }
+}
+
+fn find_window_by_id(windows: &OsWindows, window_id: WindowId) -> Option<&Window> {
+    windows.0.iter().find_map(|os_window| {
+        os_window
+            .tabs
+            .iter()
+            .find_map(|tab| tab.windows.iter().find(|window| window.id == window_id))
+    })
 }
 
 fn focused_active_window(windows: &OsWindows) -> Option<&model::Window> {
@@ -91,6 +110,10 @@ fn focused_active_window(windows: &OsWindows) -> Option<&model::Window> {
         })
 }
 
+fn window_cwd(window: &Window) -> &Path {
+    window.foreground_processes[0].cwd.as_path()
+}
+
 fn resolve_relative_path(windows: &OsWindows, path: &Path) -> PathBuf {
     // Resolving the relative path needs to happen by trying to find the active window, and get the
     // working directory from its first process. We cannot just get it from the client (the felis
@@ -101,7 +124,7 @@ fn resolve_relative_path(windows: &OsWindows, path: &Path) -> PathBuf {
     if path.is_relative() {
         if let Some(window) = focused_active_window(windows) {
             let mut path_buf = PathBuf::new();
-            path_buf.push(window.foreground_processes[0].cwd.as_path());
+            path_buf.push(window_cwd(window));
             path_buf.push(path);
             path_buf
         } else {
@@ -112,19 +135,16 @@ fn resolve_relative_path(windows: &OsWindows, path: &Path) -> PathBuf {
     }
 }
 
-fn find_workspace(windows: &OsWindows, path: &Path) -> Result<WindowId> {
+fn find_workspace<'a>(windows: &'a OsWindows, path: &Path) -> Result<&'a Window> {
     let path = resolve_relative_path(windows, path);
 
     let workspace_window = windows.0.iter().find_map(|os_window| {
         os_window.tabs.iter().find_map(|tab| {
-            tab.windows
-                .iter()
-                .find(|w| {
-                    w.foreground_processes
-                        .iter()
-                        .any(|process| is_helix_bin(process) && is_in_workspace(process, &path))
-                })
-                .map(|w| w.id)
+            tab.windows.iter().find(|w| {
+                w.foreground_processes
+                    .iter()
+                    .any(|process| is_helix_bin(process) && is_in_workspace(process, &path))
+            })
         })
     });
 
@@ -289,7 +309,7 @@ mod test {
 
     #[tokio::test]
     async fn test_open_in_helix_with_kitty_tab_id_command() {
-        let path = "/path/to/felis/src/lib.rs";
+        let path = "src/lib.rs";
 
         let mut buf = Vec::new();
         Command::OpenInHelix {
@@ -303,6 +323,7 @@ mod test {
 
         let (cl, reader_writer_stub) = stub_command_listener(buf);
         let mut executor = MockExecutor::new();
+        expect_ls_success(&mut executor);
         expect_focus_window_succes(&mut executor, WindowId(1));
         expect_send_text_success(&mut executor, r"\E", WindowId(1));
         expect_send_text_success(
@@ -320,8 +341,37 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_open_in_helix_without_kitty_tab_id_command() {
+    async fn test_open_in_helix_turns_absolute_path_to_relative() {
         let path = "/path/to/felis/src/lib.rs";
+
+        let mut buf = Vec::new();
+        Command::OpenInHelix {
+            kitty_tab_id: Some(1),
+            path: PathBuf::from(path),
+        }
+        .write(&mut buf)
+        .await
+        .unwrap();
+        Command::Shutdown.write(&mut buf).await.unwrap();
+
+        let (cl, reader_writer_stub) = stub_command_listener(buf);
+        let mut executor = MockExecutor::new();
+        expect_ls_success(&mut executor);
+        expect_focus_window_succes(&mut executor, WindowId(1));
+        expect_send_text_success(&mut executor, r"\E", WindowId(1));
+        expect_send_text_success(&mut executor, r":open src/lib.rs\r", WindowId(1));
+
+        listen(&cl, &KittyTerminal::mock(executor)).await;
+
+        let response = read_response(&reader_writer_stub)
+            .await
+            .expect("Couldn't read response");
+        assert_eq!(*response, Response::Ack);
+    }
+
+    #[tokio::test]
+    async fn test_open_in_helix_without_kitty_tab_id_command() {
+        let path = "src/lib.rs";
 
         let mut buf = Vec::new();
         Command::OpenInHelix {
