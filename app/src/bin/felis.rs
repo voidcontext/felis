@@ -1,9 +1,9 @@
-use std::{path::PathBuf, println};
+use std::{path::PathBuf, println, process::Stdio};
 
 use clap::{Parser, Subcommand};
 use felis::Result;
 use felis_protocol::{WireRead, WireWrite};
-use tokio::net::UnixStream;
+use tokio::{io::AsyncReadExt, net::UnixStream};
 
 #[derive(Parser, Debug)]
 struct Cli {
@@ -13,9 +13,18 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
-    Echo { message: Vec<String> },
+    Echo {
+        message: Vec<String>,
+    },
     GetActiveFocusedWindow,
-    OpenInHelix { path: PathBuf, tab_id: Option<u32> },
+    OpenInHelix {
+        #[arg(short, long, required_unless_present("file_browser"))]
+        path: Option<PathBuf>,
+        #[arg(short, long)]
+        tab_id: Option<u32>,
+        #[arg(short, long, required_unless_present("path"))]
+        file_browser: Option<String>,
+    },
     Shutdown,
 }
 
@@ -35,7 +44,28 @@ async fn main() -> Result<()> {
                 .write(&mut socket)
                 .await?;
         }
-        Command::OpenInHelix { tab_id, path } => {
+        Command::OpenInHelix {
+            tab_id,
+            path,
+            file_browser,
+        } => {
+            let path = if let Some(path) = path {
+                path
+            } else if let Some(file_browser) = file_browser {
+                let mut child = tokio::process::Command::new(file_browser)
+                    .stdout(Stdio::piped())
+                    .spawn()?;
+                let mut stdout = child.stdout.take().unwrap();
+                let mut out = String::new();
+                stdout.read_to_string(&mut out).await?;
+                let out = out.trim_end();
+                PathBuf::from(out)
+            } else {
+                panic!("This shouldn't happen")
+            };
+
+            println!("path: {path:?}");
+
             let cmd = felis::Command::OpenInHelix {
                 kitty_tab_id: tab_id,
                 path,
