@@ -72,6 +72,11 @@
         inputsFrom = [felis.crate];
         inherit (felis) checks;
       };
+      devShells.nightly = pkgs.mkShell {
+        packages = [
+          pkgs.rust-bin.nightly.latest.default
+        ];
+      };
     });
   in
     outputs

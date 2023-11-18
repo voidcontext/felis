@@ -1,90 +1,58 @@
 use std::path::{Path, PathBuf};
 
-use felis_protocol::{WireRead, WireWrite};
 use kitty_remote_bindings::{
     model::{self, OsWindows, Window, WindowId},
     Matcher,
 };
-use tokio::io::{AsyncRead, AsyncWrite};
 
-use super::command_listener::CommandListener;
 use crate::{kitty_terminal::KittyTerminal, Command, FelisError, Response, Result};
 
-pub async fn listen<R, C>(command_listener: &C, kitty: &KittyTerminal)
-where
-    R: AsyncRead + AsyncWrite + std::marker::Unpin + std::marker::Send,
-    C: CommandListener<R>,
-{
-    loop {
-        match handle_connection(command_listener, kitty).await {
-            Ok(Command::Shutdown) => break,
-            Ok(_) => (),
-            Err(e) => println!("An error happened: {e:?}"),
+/// # Errors
+///
+/// Will return Err if Kitty terminal related operations fail
+pub async fn handle_command(cmd: &Command, kitty: &KittyTerminal) -> Result<Response> {
+    let response = match &cmd {
+        Command::GetActiveFocusedWindow => {
+            let windows = kitty.ls().await?;
+            let window =
+                focused_active_window(&windows).ok_or_else(|| FelisError::UnexpectedError {
+                    message: "Couldn't find active focused window".to_string(),
+                })?;
+
+            Response::WindowId(window.id.0)
         }
-    }
-}
-
-async fn handle_connection<R, C>(command_listener: &C, kitty: &KittyTerminal) -> Result<Command>
-where
-    R: AsyncRead + AsyncWrite + std::marker::Unpin + std::marker::Send,
-    C: CommandListener<R>,
-{
-    match command_listener.accept().await {
-        Ok(mut reader_writer) => {
-            let cmd = *Command::read(&mut reader_writer).await?;
-            match &cmd {
-                Command::Shutdown => (),
-                Command::Echo(msg) => {
-                    Response::Message((*msg).clone())
-                        .write(&mut reader_writer)
-                        .await?;
-                }
-                Command::GetActiveFocusedWindow => {
-                    let windows = kitty.ls().await?;
-                    let window = focused_active_window(&windows).ok_or_else(|| {
-                        FelisError::UnexpectedError {
-                            message: "Couldn't find active focused window".to_string(),
-                        }
-                    })?;
-
-                    Response::WindowId(window.id.0)
-                        .write(&mut reader_writer)
-                        .await?;
-                }
-                Command::OpenInHelix { path, kitty_tab_id } => {
-                    let windows = kitty.ls().await?;
-                    let kitty_window = if let Some(id) = kitty_tab_id {
-                        find_window_by_id(&windows, WindowId(*id)).ok_or_else(|| {
-                            FelisError::UnexpectedError {
-                                message: format!("Couldn't find window with id {id}"),
-                            }
-                        })?
-                    } else {
-                        find_workspace(&windows, path)?
-                    };
-
-                    let rel_path = if path.is_absolute() {
-                        path.strip_prefix(window_cwd(kitty_window))?
-                    } else {
-                        path
-                    };
-
-                    kitty.focus_window(Matcher::Id(kitty_window.id)).await?;
-                    kitty.send_text(Matcher::Id(kitty_window.id), r"\E").await?;
-                    kitty
-                        .send_text(
-                            Matcher::Id(kitty_window.id),
-                            format!(r":open {}\r", rel_path.to_string_lossy()).as_str(),
-                        )
-                        .await?;
-
-                    Response::Ack.write(&mut reader_writer).await?;
-                }
+        Command::OpenInHelix { path, kitty_tab_id } => {
+            let windows = kitty.ls().await?;
+            let kitty_window = if let Some(id) = kitty_tab_id {
+                find_window_by_id(&windows, WindowId(*id)).ok_or_else(|| {
+                    FelisError::UnexpectedError {
+                        message: format!("Couldn't find window with id {id}"),
+                    }
+                })?
+            } else {
+                find_workspace(&windows, path)?
             };
-            Ok(cmd)
+
+            let rel_path = if path.is_absolute() {
+                path.strip_prefix(window_cwd(kitty_window))?
+            } else {
+                path
+            };
+
+            kitty.focus_window(Matcher::Id(kitty_window.id)).await?;
+            kitty.send_text(Matcher::Id(kitty_window.id), r"\E").await?;
+            kitty
+                .send_text(
+                    Matcher::Id(kitty_window.id),
+                    format!(r":open {}\r", rel_path.to_string_lossy()).as_str(),
+                )
+                .await?;
+
+            Response::Ack
         }
-        Err(_) => todo!(),
-    }
+    };
+
+    Ok(response)
 }
 
 fn find_window_by_id(windows: &OsWindows, window_id: WindowId) -> Option<&Window> {
@@ -166,79 +134,20 @@ fn is_helix_bin(process: &model::Process) -> bool {
 mod test {
 
     use std::{
-        future,
         os::unix::process::ExitStatusExt,
         path::PathBuf,
         process::{ExitStatus, Output},
     };
 
-    use felis_protocol::{WireRead, WireWrite};
     use kitty_remote_bindings::{model::WindowId, FocusWindow, Ls, Matcher, MatcherExt, SendText};
     use mockall::predicate::*;
     use pretty_assertions::assert_eq;
-    use test_utils::ReaderWriterStub;
 
     use crate::{
         kitty_terminal::{test_fixture, KittyTerminal, MockExecutor},
-        server::command_listener::MockCommandListener,
+        server::command_server::handle_command,
         Command, Response,
     };
-
-    use super::listen;
-
-    fn stub_command_listener(
-        buf: Vec<u8>,
-    ) -> (MockCommandListener<ReaderWriterStub>, ReaderWriterStub) {
-        let reader_writer_stub = ReaderWriterStub::new(buf);
-        let mut cl = MockCommandListener::new();
-        cl.expect_accept().returning({
-            let rws = reader_writer_stub.clone();
-            move || Box::pin(future::ready(Ok(rws.clone())))
-        });
-
-        (cl, reader_writer_stub)
-    }
-
-    async fn read_response(reader_writer_stub: &ReaderWriterStub) -> crate::Result<Box<Response>> {
-        let written_bytes = {
-            let written = reader_writer_stub.written();
-            let written_bytes = written.lock().unwrap();
-            (*written_bytes).clone()
-        }; // drop the non async aware mutex guard at the end of the scope
-
-        let response = Response::read(&mut written_bytes.as_slice()).await?;
-        Ok(response)
-    }
-
-    #[allow(clippy::assertions_on_constants)]
-    #[tokio::test]
-    async fn test_shutdown_command() {
-        let mut buf = Vec::new();
-        Command::Shutdown.write(&mut buf).await.unwrap();
-
-        let (cl, _) = stub_command_listener(buf);
-        listen(&cl, &KittyTerminal::mock(MockExecutor::new())).await;
-
-        assert!(true);
-    }
-
-    #[tokio::test]
-    async fn test_echo_command() {
-        let mut buf = Vec::new();
-        Command::Echo("test message".to_string())
-            .write(&mut buf)
-            .await
-            .unwrap();
-        Command::Shutdown.write(&mut buf).await.unwrap();
-
-        let (cl, reader_writer_stub) = stub_command_listener(buf);
-        listen(&cl, &KittyTerminal::mock(MockExecutor::new())).await;
-
-        let response = read_response(&reader_writer_stub)
-            .await
-            .expect("Couldn't read response");
-        assert_eq!(*response, Response::Message("test message".to_string()));
-    }
 
     fn expect_ls_success(executor: &mut MockExecutor) {
         executor
@@ -288,40 +197,25 @@ mod test {
 
     #[tokio::test]
     async fn test_get_active_focused_window_command() {
-        let mut buf = Vec::new();
-        Command::GetActiveFocusedWindow
-            .write(&mut buf)
-            .await
-            .unwrap();
-        Command::Shutdown.write(&mut buf).await.unwrap();
+        let cmd = Command::GetActiveFocusedWindow;
 
-        let (cl, reader_writer_stub) = stub_command_listener(buf);
         let mut executor = MockExecutor::new();
         expect_ls_success(&mut executor);
 
-        listen(&cl, &KittyTerminal::mock(executor)).await;
-
-        let response = read_response(&reader_writer_stub)
+        let response = handle_command(&cmd, &KittyTerminal::mock(executor))
             .await
-            .expect("Couldn't read response");
-        assert_eq!(*response, Response::WindowId(2));
+            .unwrap();
+        assert_eq!(response, Response::WindowId(2));
     }
 
     #[tokio::test]
     async fn test_open_in_helix_with_kitty_tab_id_command() {
         let path = "src/lib.rs";
 
-        let mut buf = Vec::new();
-        Command::OpenInHelix {
+        let cmd = Command::OpenInHelix {
             kitty_tab_id: Some(1),
             path: PathBuf::from(path),
-        }
-        .write(&mut buf)
-        .await
-        .unwrap();
-        Command::Shutdown.write(&mut buf).await.unwrap();
-
-        let (cl, reader_writer_stub) = stub_command_listener(buf);
+        };
         let mut executor = MockExecutor::new();
         expect_ls_success(&mut executor);
         expect_focus_window_succes(&mut executor, WindowId(1));
@@ -332,58 +226,41 @@ mod test {
             WindowId(1),
         );
 
-        listen(&cl, &KittyTerminal::mock(executor)).await;
-
-        let response = read_response(&reader_writer_stub)
+        let response = handle_command(&cmd, &KittyTerminal::mock(executor))
             .await
-            .expect("Couldn't read response");
-        assert_eq!(*response, Response::Ack);
+            .unwrap();
+        assert_eq!(response, Response::Ack);
     }
 
     #[tokio::test]
     async fn test_open_in_helix_turns_absolute_path_to_relative() {
         let path = "/path/to/felis/src/lib.rs";
 
-        let mut buf = Vec::new();
-        Command::OpenInHelix {
+        let cmd = Command::OpenInHelix {
             kitty_tab_id: Some(1),
             path: PathBuf::from(path),
-        }
-        .write(&mut buf)
-        .await
-        .unwrap();
-        Command::Shutdown.write(&mut buf).await.unwrap();
+        };
 
-        let (cl, reader_writer_stub) = stub_command_listener(buf);
         let mut executor = MockExecutor::new();
         expect_ls_success(&mut executor);
         expect_focus_window_succes(&mut executor, WindowId(1));
         expect_send_text_success(&mut executor, r"\E", WindowId(1));
         expect_send_text_success(&mut executor, r":open src/lib.rs\r", WindowId(1));
 
-        listen(&cl, &KittyTerminal::mock(executor)).await;
-
-        let response = read_response(&reader_writer_stub)
+        let response = handle_command(&cmd, &KittyTerminal::mock(executor))
             .await
-            .expect("Couldn't read response");
-        assert_eq!(*response, Response::Ack);
+            .unwrap();
+        assert_eq!(response, Response::Ack);
     }
 
     #[tokio::test]
     async fn test_open_in_helix_without_kitty_tab_id_command() {
         let path = "src/lib.rs";
 
-        let mut buf = Vec::new();
-        Command::OpenInHelix {
+        let cmd = Command::OpenInHelix {
             kitty_tab_id: None,
             path: PathBuf::from(path),
-        }
-        .write(&mut buf)
-        .await
-        .unwrap();
-        Command::Shutdown.write(&mut buf).await.unwrap();
-
-        let (cl, reader_writer_stub) = stub_command_listener(buf);
+        };
 
         let mut executor = MockExecutor::new();
         expect_ls_success(&mut executor);
@@ -395,29 +272,21 @@ mod test {
         );
         expect_focus_window_succes(&mut executor, WindowId(1));
 
-        listen(&cl, &KittyTerminal::mock(executor)).await;
-
-        let response = read_response(&reader_writer_stub)
+        let response = handle_command(&cmd, &KittyTerminal::mock(executor))
             .await
-            .expect("Couldn't read response");
-        assert_eq!(*response, Response::Ack);
+            .unwrap();
+
+        assert_eq!(response, Response::Ack);
     }
 
     #[tokio::test]
     async fn test_open_in_helix_without_kitty_tab_id_command_resolves_relative_path() {
         let path = "src/lib.rs";
 
-        let mut buf = Vec::new();
-        Command::OpenInHelix {
+        let cmd = Command::OpenInHelix {
             kitty_tab_id: None,
             path: PathBuf::from(path),
-        }
-        .write(&mut buf)
-        .await
-        .unwrap();
-        Command::Shutdown.write(&mut buf).await.unwrap();
-
-        let (cl, reader_writer_stub) = stub_command_listener(buf);
+        };
 
         let mut executor = MockExecutor::new();
         expect_ls_success(&mut executor);
@@ -429,11 +298,9 @@ mod test {
         );
         expect_focus_window_succes(&mut executor, WindowId(1));
 
-        listen(&cl, &KittyTerminal::mock(executor)).await;
-
-        let response = read_response(&reader_writer_stub)
+        let response = handle_command(&cmd, &KittyTerminal::mock(executor))
             .await
-            .expect("Couldn't read response");
-        assert_eq!(*response, Response::Ack);
+            .unwrap();
+        assert_eq!(response, Response::Ack);
     }
 }

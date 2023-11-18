@@ -8,10 +8,6 @@ edition = "2021"
 path = "src/lib.rs"
 
 [[bin]]
-path = "src/bin/felis-server.rs"
-name = "felis-server"
-
-[[bin]]
 path = "src/bin/felis.rs"
 name = "felis"
 
@@ -20,15 +16,10 @@ tokio = {version = "1.33.0", features = ["net", "process", "io-util","rt-multi-t
 async-trait = "0.1.74"
 thiserror = "1.0.50"
 clap = {version = "4.4.7", features = ["derive"]}
-signal-hook = "0.3.17"
-felis-protocol = { path = "../protocol" }
-felis-protocol-macro = { path = "../protocol_macro" }
 kitty-remote-bindings = { version = "0.3.0"}
 
 [dev-dependencies]
 pretty_assertions = "1.4.0"
-tempfile = "3.8.0"
-test_utils = { "path" = "../test_utils" }
 tokio = {version = "1.33.0", features = [ "rt"]}
 lazy_static = "1.4.0"
 mockall = "0.11.4"

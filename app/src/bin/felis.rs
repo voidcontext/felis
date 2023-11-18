@@ -1,9 +1,8 @@
 use std::{path::PathBuf, println, process::Stdio};
 
 use clap::{Parser, Subcommand};
-use felis::Result;
-use felis_protocol::{WireRead, WireWrite};
-use tokio::{io::AsyncReadExt, net::UnixStream};
+use felis::{kitty_terminal::KittyTerminal, server::handle_command, Result};
+use tokio::io::AsyncReadExt;
 
 #[derive(Parser, Debug)]
 struct Cli {
@@ -13,9 +12,6 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
-    Echo {
-        message: Vec<String>,
-    },
     GetActiveFocusedWindow,
     OpenInHelix {
         #[arg(short, long, required_unless_present("file_browser"))]
@@ -25,24 +21,16 @@ enum Command {
         #[arg(short, long, required_unless_present("path"))]
         file_browser: Option<String>,
     },
-    Shutdown,
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    let mut socket = UnixStream::connect("/tmp/felis.sock").await?;
-
-    match cli.command {
-        Command::Echo { message } => {
-            let message = message.join(" ");
-            felis::Command::Echo(message).write(&mut socket).await?;
-        }
+    let kitty = KittyTerminal::new();
+    let response = match cli.command {
         Command::GetActiveFocusedWindow => {
-            felis::Command::GetActiveFocusedWindow
-                .write(&mut socket)
-                .await?;
+            handle_command(&felis::Command::GetActiveFocusedWindow, &kitty).await?
         }
         Command::OpenInHelix {
             tab_id,
@@ -64,22 +52,18 @@ async fn main() -> Result<()> {
                 panic!("This shouldn't happen")
             };
 
-            println!("path: {path:?}");
-
-            let cmd = felis::Command::OpenInHelix {
-                kitty_tab_id: tab_id,
-                path,
-            };
-            cmd.write(&mut socket).await?;
+            handle_command(
+                &felis::Command::OpenInHelix {
+                    kitty_tab_id: tab_id,
+                    path,
+                },
+                &kitty,
+            )
+            .await?
         }
-        Command::Shutdown => {
-            felis::Command::Shutdown.write(&mut socket).await?;
-        }
-    }
+    };
 
-    let response = felis::Response::read(&mut socket).await?;
-
-    match *response {
+    match response {
         felis::Response::Ack => (),
         felis::Response::Message(msg) => println!("{msg}"),
         felis::Response::WindowId(id) => println!("{id}"),

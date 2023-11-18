@@ -1,8 +1,6 @@
 pub mod kitty_terminal;
 pub mod server;
 
-use felis_protocol::{WireReadError, WireWriteError};
-use felis_protocol_macro::{WireRead, WireWrite};
 use std::{
     io::Error,
     num::TryFromIntError,
@@ -21,10 +19,6 @@ pub enum FelisError {
     TryFromInt(#[from] TryFromIntError),
     #[error("FromUtf8 error")]
     FromUtf8(#[from] FromUtf8Error),
-    #[error("WireFormatRead error")]
-    WireFormatRead(#[from] WireReadError),
-    #[error("WireFormatWrite error")]
-    WireFormatWrite(#[from] WireWriteError),
     #[error("unexpected error: {message}")]
     UnexpectedError { message: String },
     #[error("kitty error")]
@@ -33,10 +27,7 @@ pub enum FelisError {
     StripPrefixError(#[from] StripPrefixError),
 }
 
-#[derive(WireRead, WireWrite)]
 pub enum Command {
-    Shutdown,
-    Echo(String),
     GetActiveFocusedWindow,
     OpenInHelix {
         path: PathBuf,
@@ -44,7 +35,7 @@ pub enum Command {
     },
 }
 
-#[derive(Debug, WireRead, WireWrite, PartialEq)]
+#[derive(Debug, PartialEq)]
 pub enum Response {
     Ack,
     Message(String),
