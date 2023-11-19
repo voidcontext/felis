@@ -4,8 +4,9 @@ use std::process::Output;
 
 use crate::Result;
 use async_trait::async_trait;
+use kitty_remote_bindings::command::options::{Cwd, LaunchType, Matcher};
+use kitty_remote_bindings::command::{CommandOutput, FocusWindow, Launch, Ls, SendText};
 use kitty_remote_bindings::model::OsWindows;
-use kitty_remote_bindings::{CommandOutput, FocusWindow, Ls, Matcher, MatcherExt, SendText};
 
 #[cfg(test)]
 use mockall::automock;
@@ -13,6 +14,7 @@ use mockall::automock;
 #[cfg_attr(test, automock)]
 #[async_trait]
 pub(crate) trait Executor {
+    async fn launch(&self, launch: &Launch) -> io::Result<Output>;
     async fn ls(&self, ls: &Ls) -> io::Result<Output>;
     async fn send_text(&self, send_text: &SendText) -> io::Result<Output>;
     async fn focus_window(&self, focus_window: &FocusWindow) -> io::Result<Output>;
@@ -21,6 +23,11 @@ pub(crate) trait Executor {
 struct TokioExecutor;
 #[async_trait]
 impl Executor for TokioExecutor {
+    async fn launch(&self, launch: &Launch) -> io::Result<Output> {
+        tokio::process::Command::from(Into::<std::process::Command>::into(launch))
+            .output()
+            .await
+    }
     async fn ls(&self, ls: &Ls) -> io::Result<Output> {
         tokio::process::Command::from(Into::<std::process::Command>::into(ls))
             .output()
@@ -40,13 +47,15 @@ impl Executor for TokioExecutor {
 }
 
 pub struct KittyTerminal {
+    kitty_socket: String,
     executor: Box<dyn Executor + Send + Sync + 'static>,
 }
 
 impl KittyTerminal {
     #[must_use]
-    pub fn new() -> Self {
+    pub fn new(kitty_socket: String) -> Self {
         Self {
+            kitty_socket,
             executor: Box::new(TokioExecutor),
         }
     }
@@ -54,20 +63,40 @@ impl KittyTerminal {
     #[cfg(test)]
     pub(crate) fn mock(mock_executor: MockExecutor) -> Self {
         Self {
+            kitty_socket: "DummySocket".to_string(),
             executor: Box::new(mock_executor),
         }
     }
 
+    pub async fn launch(&self, args: Vec<String>, launch_type: LaunchType, cwd: Cwd) -> Result<()> {
+        let output = self
+            .executor
+            .launch(
+                &Launch::new(args)
+                    .to(self.kitty_socket.clone())
+                    .launch_type(launch_type)
+                    .cwd(cwd),
+            )
+            .await?;
+        Launch::result(&output)?;
+
+        Ok(())
+    }
+
     pub async fn ls(&self) -> Result<OsWindows> {
-        let output = self.executor.ls(&Ls::new()).await?;
+        let output = self
+            .executor
+            .ls(&Ls::new().to(self.kitty_socket.clone()))
+            .await?;
         let result = Ls::result(&output)?;
 
         Ok(result)
     }
 
     pub async fn send_text(&self, matcher: Matcher, text: &str) -> Result<()> {
-        let mut cmd = SendText::new(text.to_string());
-        cmd.matcher(matcher);
+        let cmd = SendText::new(text.to_string())
+            .to(self.kitty_socket.clone())
+            .matcher(matcher);
         let output = self.executor.send_text(&cmd).await?;
 
         SendText::result(&output)?;
@@ -76,8 +105,9 @@ impl KittyTerminal {
     }
 
     pub async fn focus_window(&self, matcher: Matcher) -> Result<()> {
-        let mut cmd = FocusWindow::new();
-        cmd.matcher(matcher);
+        let cmd = FocusWindow::new()
+            .to(self.kitty_socket.clone())
+            .matcher(matcher);
         let output = self.executor.focus_window(&cmd).await?;
 
         SendText::result(&output)?;
@@ -86,17 +116,14 @@ impl KittyTerminal {
     }
 }
 
-impl Default for KittyTerminal {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::process::{ExitStatus, Output};
 
-    use kitty_remote_bindings::{model::WindowId, Ls, Matcher, MatcherExt, SendText};
+    use kitty_remote_bindings::{
+        command::{options::Matcher, Ls, SendText},
+        model::WindowId,
+    };
     use mockall::predicate::eq;
     use pretty_assertions::assert_eq;
 
@@ -108,7 +135,7 @@ mod tests {
 
         executor
             .expect_ls()
-            .with(eq(Ls::new()))
+            .with(eq(Ls::new().to("dummy.sock".to_string())))
             .times(1)
             .returning(|_| {
                 Ok(Output {
@@ -119,6 +146,7 @@ mod tests {
             });
 
         let terminal = KittyTerminal {
+            kitty_socket: "dummy.sock".to_string(),
             executor: Box::new(executor),
         };
 
@@ -133,8 +161,9 @@ mod tests {
 
         let matcher = Matcher::Id(WindowId(9));
 
-        let mut cmd = SendText::new("text message".to_string());
-        cmd.matcher(matcher.clone());
+        let cmd = SendText::new("text message".to_string())
+            .matcher(matcher.clone())
+            .to("dummy.sock".to_string());
 
         executor
             .expect_send_text()
@@ -149,6 +178,7 @@ mod tests {
             });
 
         let terminal = KittyTerminal {
+            kitty_socket: "dummy.sock".to_string(),
             executor: Box::new(executor),
         };
 

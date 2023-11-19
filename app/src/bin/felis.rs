@@ -1,7 +1,12 @@
-use std::{path::PathBuf, println, process::Stdio};
+use std::{
+    path::{Path, PathBuf},
+    println,
+    process::Stdio,
+};
 
 use clap::{Parser, Subcommand};
 use felis::{kitty_terminal::KittyTerminal, server::handle_command, Result};
+use kitty_remote_bindings::command::options::{Cwd, LaunchType};
 use tokio::io::AsyncReadExt;
 
 #[derive(Parser, Debug)]
@@ -43,7 +48,7 @@ enum Command {
 async fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    let kitty = KittyTerminal::new();
+    let kitty = KittyTerminal::new(kitty_socket()?);
     let response = match cli.command {
         Command::GetActiveFocusedWindow => {
             handle_command(&felis::Command::GetActiveFocusedWindow, &kitty).await?
@@ -66,26 +71,21 @@ async fn main() -> Result<()> {
             if launch_overlay {
                 let executable = std::env::current_exe()?;
 
-                // TODO: replace this with a KittyCommand
-                let mut cmd = tokio::process::Command::new("kitty");
-                cmd.args([
-                    "@",
-                    "launch",
-                    "--type",
-                    "overlay",
-                    "--cwd",
-                    "current",
-                    executable.as_os_str().to_str().unwrap(),
-                    "open-browser",
-                    file_browser.as_str(),
-                ]);
+                let mut args = vec![
+                    executable.as_os_str().to_str().unwrap().to_string(),
+                    "open-browser".to_string(),
+                    file_browser.as_str().to_string(),
+                ];
 
                 if let Some(tab_id) = tab_id {
-                    cmd.arg("--tab-id");
-                    cmd.arg(tab_id.to_string());
-                }
+                    args.push("--tab-id".to_string());
+                    args.push(tab_id.to_string());
+                };
 
-                cmd.spawn()?.wait().await?;
+                // TODO: replace this with a KittyComman
+                kitty
+                    .launch(args, LaunchType::Overlay, Cwd::Current)
+                    .await?;
 
                 felis::Response::Ack
             } else {
@@ -119,4 +119,25 @@ async fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+// When sockets are enabled the KITTY_LISTEN_ON env var is set in shells running in kitty windows.
+// But when felis is executed via `pass_selection_to_program`, then the env var is not set and the
+// kitty program spawned by felis cannot communicate through tty either, so we need this heuristic
+// here when we try to find the socket file based on the parent's p, so we need this heuristic here
+// when we try to find the socket file based on the parent's pid
+fn kitty_socket() -> Result<String> {
+    if let Ok(socket) = std::env::var("KITTY_LISTEN_ON") {
+        Ok(socket)
+    } else {
+        let parent_pid = std::os::unix::process::parent_id();
+        let socket = format!("/tmp/kitty.sock-{parent_pid}");
+        if Path::new(&socket).exists() {
+            Ok(format!("unix:{socket}"))
+        } else {
+            Err(felis::FelisError::UnexpectedError {
+                message: "couldn't determine kitty socket".to_string(),
+            })
+        }
+    }
 }

@@ -1,8 +1,8 @@
 use std::path::{Path, PathBuf};
 
 use kitty_remote_bindings::{
+    command::options::Matcher,
     model::{self, OsWindows, Window, WindowId},
-    Matcher,
 };
 
 use crate::{kitty_terminal::KittyTerminal, Command, FelisError, Response, Result};
@@ -139,7 +139,10 @@ mod test {
         process::{ExitStatus, Output},
     };
 
-    use kitty_remote_bindings::{model::WindowId, FocusWindow, Ls, Matcher, MatcherExt, SendText};
+    use kitty_remote_bindings::{
+        command::{options::Matcher, FocusWindow, Ls, SendText},
+        model::WindowId,
+    };
     use mockall::predicate::*;
     use pretty_assertions::assert_eq;
 
@@ -153,7 +156,7 @@ mod test {
         executor
             .expect_ls()
             .times(1)
-            .with(eq(Ls::new()))
+            .with(eq(Ls::new().to("DummySocket".to_string())))
             .returning(|_| {
                 Ok(Output {
                     status: ExitStatus::from_raw(0),
@@ -164,8 +167,9 @@ mod test {
     }
 
     fn expect_send_text_success(executor: &mut MockExecutor, text: &str, window_id: WindowId) {
-        let mut cmd = SendText::new(text.to_string());
-        cmd.matcher(Matcher::Id(window_id));
+        let cmd = SendText::new(text.to_string())
+            .matcher(Matcher::Id(window_id))
+            .to("DummySocket".to_string());
         executor
             .expect_send_text()
             .times(1)
@@ -180,8 +184,9 @@ mod test {
     }
 
     fn expect_focus_window_succes(executor: &mut MockExecutor, window_id: WindowId) {
-        let mut cmd = FocusWindow::new();
-        cmd.matcher(Matcher::Id(window_id));
+        let cmd = FocusWindow::new()
+            .matcher(Matcher::Id(window_id))
+            .to("DummySocket".to_string());
         executor
             .expect_focus_window()
             .times(1)
