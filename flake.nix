@@ -33,7 +33,6 @@
         buildInputs = pkgs.lib.optionals pkgs.stdenv.isDarwin [
           pkgs.libiconv
         ];
-        skipBuildDeps = true;
       };
     in rec {
       crate = nru.mkCrate (commonArgs
