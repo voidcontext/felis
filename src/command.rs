@@ -5,54 +5,53 @@ use kitty_remote_bindings::{
     model::{self, OsWindows, Window, WindowId},
 };
 
-use crate::{kitty_terminal::KittyTerminal, Command, FelisError, Response, Result};
+use crate::{kitty_terminal::KittyTerminal, FelisError, Result};
 
 /// # Errors
 ///
 /// Will return Err if Kitty terminal related operations fail
-pub async fn handle_command(cmd: &Command, kitty: &KittyTerminal) -> Result<Response> {
-    let response = match &cmd {
-        Command::GetActiveFocusedWindow => {
-            let windows = kitty.ls().await?;
-            let window =
-                focused_active_window(&windows).ok_or_else(|| FelisError::UnexpectedError {
-                    message: "Couldn't find active focused window".to_string(),
-                })?;
+pub async fn get_active_focused_window(kitty: &KittyTerminal) -> Result<WindowId> {
+    let windows = kitty.ls().await?;
+    let window = focused_active_window(&windows).ok_or_else(|| FelisError::UnexpectedError {
+        message: "Couldn't find active focused window".to_string(),
+    })?;
 
-            Response::WindowId(window.id.0)
-        }
-        Command::OpenInHelix { path, kitty_tab_id } => {
-            let windows = kitty.ls().await?;
-            let kitty_window = if let Some(id) = kitty_tab_id {
-                find_window_by_id(&windows, WindowId(*id)).ok_or_else(|| {
-                    FelisError::UnexpectedError {
-                        message: format!("Couldn't find window with id {id}"),
-                    }
-                })?
-            } else {
-                find_workspace(&windows, path)?
-            };
+    Ok(window.id)
+}
 
-            let rel_path = if path.is_absolute() {
-                path.strip_prefix(window_cwd(kitty_window))?
-            } else {
-                path
-            };
-
-            kitty.focus_window(Matcher::Id(kitty_window.id)).await?;
-            kitty.send_text(Matcher::Id(kitty_window.id), r"\E").await?;
-            kitty
-                .send_text(
-                    Matcher::Id(kitty_window.id),
-                    format!(r":open {}\r", rel_path.to_string_lossy()).as_str(),
-                )
-                .await?;
-
-            Response::Ack
-        }
+/// # Errors
+///
+/// Will return Err if Kitty terminal related operations fail
+pub async fn open_in_helix(
+    path: &Path,
+    kitty_tab_id: Option<WindowId>,
+    kitty: &KittyTerminal,
+) -> Result<()> {
+    let windows = kitty.ls().await?;
+    let kitty_window = if let Some(id) = kitty_tab_id {
+        find_window_by_id(&windows, id).ok_or_else(|| FelisError::UnexpectedError {
+            message: format!("Couldn't find window with id {id}"),
+        })?
+    } else {
+        find_workspace(&windows, path)?
     };
 
-    Ok(response)
+    let rel_path = if path.is_absolute() {
+        path.strip_prefix(window_cwd(kitty_window))?
+    } else {
+        path
+    };
+
+    kitty.focus_window(Matcher::Id(kitty_window.id)).await?;
+    kitty.send_text(Matcher::Id(kitty_window.id), r"\E").await?;
+    kitty
+        .send_text(
+            Matcher::Id(kitty_window.id),
+            format!(r":open {}\r", rel_path.to_string_lossy()).as_str(),
+        )
+        .await?;
+
+    Ok(())
 }
 
 fn find_window_by_id(windows: &OsWindows, window_id: WindowId) -> Option<&Window> {
@@ -147,9 +146,8 @@ mod test {
     use pretty_assertions::assert_eq;
 
     use crate::{
+        command::{get_active_focused_window, open_in_helix},
         kitty_terminal::{test_fixture, KittyTerminal, MockExecutor},
-        server::command_server::handle_command,
-        Command, Response,
     };
 
     fn expect_ls_success(executor: &mut MockExecutor) {
@@ -201,26 +199,20 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_get_active_focused_window_command() {
-        let cmd = Command::GetActiveFocusedWindow;
-
+    async fn test_get_active_focused_window() {
         let mut executor = MockExecutor::new();
         expect_ls_success(&mut executor);
 
-        let response = handle_command(&cmd, &KittyTerminal::mock(executor))
+        let response = get_active_focused_window(&KittyTerminal::mock(executor))
             .await
             .unwrap();
-        assert_eq!(response, Response::WindowId(2));
+        assert_eq!(response, WindowId(2));
     }
 
     #[tokio::test]
-    async fn test_open_in_helix_with_kitty_tab_id_command() {
+    async fn test_open_in_helix_with_kitty_tab_id() {
         let path = "src/lib.rs";
 
-        let cmd = Command::OpenInHelix {
-            kitty_tab_id: Some(1),
-            path: PathBuf::from(path),
-        };
         let mut executor = MockExecutor::new();
         expect_ls_success(&mut executor);
         expect_focus_window_succes(&mut executor, WindowId(1));
@@ -231,20 +223,18 @@ mod test {
             WindowId(1),
         );
 
-        let response = handle_command(&cmd, &KittyTerminal::mock(executor))
-            .await
-            .unwrap();
-        assert_eq!(response, Response::Ack);
+        open_in_helix(
+            &PathBuf::from(path),
+            Some(WindowId(1)),
+            &KittyTerminal::mock(executor),
+        )
+        .await
+        .unwrap();
     }
 
     #[tokio::test]
     async fn test_open_in_helix_turns_absolute_path_to_relative() {
         let path = "/path/to/felis/src/lib.rs";
-
-        let cmd = Command::OpenInHelix {
-            kitty_tab_id: Some(1),
-            path: PathBuf::from(path),
-        };
 
         let mut executor = MockExecutor::new();
         expect_ls_success(&mut executor);
@@ -252,20 +242,18 @@ mod test {
         expect_send_text_success(&mut executor, r"\E", WindowId(1));
         expect_send_text_success(&mut executor, r":open src/lib.rs\r", WindowId(1));
 
-        let response = handle_command(&cmd, &KittyTerminal::mock(executor))
-            .await
-            .unwrap();
-        assert_eq!(response, Response::Ack);
+        open_in_helix(
+            &PathBuf::from(path),
+            Some(WindowId(1)),
+            &KittyTerminal::mock(executor),
+        )
+        .await
+        .unwrap();
     }
 
     #[tokio::test]
-    async fn test_open_in_helix_without_kitty_tab_id_command() {
+    async fn test_open_in_helix_without_kitty_tab_id() {
         let path = "src/lib.rs";
-
-        let cmd = Command::OpenInHelix {
-            kitty_tab_id: None,
-            path: PathBuf::from(path),
-        };
 
         let mut executor = MockExecutor::new();
         expect_ls_success(&mut executor);
@@ -277,22 +265,15 @@ mod test {
         );
         expect_focus_window_succes(&mut executor, WindowId(1));
 
-        let response = handle_command(&cmd, &KittyTerminal::mock(executor))
+        open_in_helix(&PathBuf::from(path), None, &KittyTerminal::mock(executor))
             .await
             .unwrap();
-
-        assert_eq!(response, Response::Ack);
     }
 
     #[tokio::test]
     async fn test_open_in_helix_without_kitty_tab_id_command_resolves_relative_path() {
         let path = "src/lib.rs";
 
-        let cmd = Command::OpenInHelix {
-            kitty_tab_id: None,
-            path: PathBuf::from(path),
-        };
-
         let mut executor = MockExecutor::new();
         expect_ls_success(&mut executor);
         expect_send_text_success(&mut executor, r"\E", WindowId(1));
@@ -303,9 +284,8 @@ mod test {
         );
         expect_focus_window_succes(&mut executor, WindowId(1));
 
-        let response = handle_command(&cmd, &KittyTerminal::mock(executor))
+        open_in_helix(&PathBuf::from(path), None, &KittyTerminal::mock(executor))
             .await
             .unwrap();
-        assert_eq!(response, Response::Ack);
     }
 }

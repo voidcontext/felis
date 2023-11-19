@@ -5,8 +5,11 @@ use std::{
 };
 
 use clap::{Parser, Subcommand};
-use felis::{kitty_terminal::KittyTerminal, server::handle_command, Result};
-use kitty_remote_bindings::command::options::{Cwd, LaunchType};
+use felis::{command, kitty_terminal::KittyTerminal, Result};
+use kitty_remote_bindings::{
+    command::options::{Cwd, LaunchType},
+    model::WindowId,
+};
 use tokio::io::AsyncReadExt;
 
 #[derive(Parser, Debug)]
@@ -24,7 +27,7 @@ enum Command {
         path: PathBuf,
         /// Open the file in the helix process running in the given window
         #[arg(short, long)]
-        tab_id: Option<u32>,
+        window_id: Option<u32>, // TODO: change this to Option<WindowId>
     },
     /// Run the given file browser / file manager and then open the selected file in helix
     OpenBrowser {
@@ -36,7 +39,7 @@ enum Command {
         /// try to determine which helix instance is running in one the parent directories of the
         /// given file.
         #[arg(short, long)]
-        tab_id: Option<u32>,
+        window_id: Option<u32>, // TODO:  change this to Option<WindowId>
         /// When true felis will launch a kitty overlay on top the current window, and run the file
         /// browser there. This is useful when felis is running from an editor.
         #[arg(short, long, default_value_t = false)]
@@ -49,23 +52,18 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     let kitty = KittyTerminal::new(kitty_socket()?);
-    let response = match cli.command {
+    match cli.command {
         Command::GetActiveFocusedWindow => {
-            handle_command(&felis::Command::GetActiveFocusedWindow, &kitty).await?
+            let window_id = command::get_active_focused_window(&kitty).await?;
+            println!("{}", window_id.0);
         }
-        Command::OpenFile { path, tab_id } => {
-            handle_command(
-                &felis::Command::OpenInHelix {
-                    kitty_tab_id: tab_id,
-                    path,
-                },
-                &kitty,
-            )
-            .await?
+        Command::OpenFile { path, window_id } => {
+            command::open_in_helix(&path, window_id.map(WindowId), &kitty).await?;
         }
+
         Command::OpenBrowser {
             file_browser,
-            tab_id,
+            window_id,
             launch_overlay,
         } => {
             if launch_overlay {
@@ -77,7 +75,7 @@ async fn main() -> Result<()> {
                     file_browser.as_str().to_string(),
                 ];
 
-                if let Some(tab_id) = tab_id {
+                if let Some(tab_id) = window_id {
                     args.push("--tab-id".to_string());
                     args.push(tab_id.to_string());
                 };
@@ -86,8 +84,6 @@ async fn main() -> Result<()> {
                 kitty
                     .launch(args, LaunchType::Overlay, Cwd::Current)
                     .await?;
-
-                felis::Response::Ack
             } else {
                 let mut child = tokio::process::Command::new(file_browser)
                     .stdout(Stdio::piped())
@@ -98,25 +94,10 @@ async fn main() -> Result<()> {
                 let out = out.trim_end();
                 let path = PathBuf::from(out);
 
-                handle_command(
-                    &felis::Command::OpenInHelix {
-                        kitty_tab_id: tab_id,
-                        path,
-                    },
-                    &kitty,
-                )
-                .await?;
-
-                felis::Response::Ack
+                command::open_in_helix(&path, window_id.map(WindowId), &kitty).await?;
             }
         }
     };
-
-    match response {
-        felis::Response::Ack => (),
-        felis::Response::Message(msg) => println!("{msg}"),
-        felis::Response::WindowId(id) => println!("{id}"),
-    }
 
     Ok(())
 }

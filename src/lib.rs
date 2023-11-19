@@ -1,12 +1,7 @@
+pub mod command;
 pub mod kitty_terminal;
-pub mod server;
 
-use std::{
-    io::Error,
-    num::TryFromIntError,
-    path::{PathBuf, StripPrefixError},
-    string::FromUtf8Error,
-};
+use std::{io::Error, num::TryFromIntError, path::StripPrefixError, string::FromUtf8Error};
 use thiserror::Error;
 
 pub type Result<T> = std::result::Result<T, FelisError>;
@@ -25,19 +20,4 @@ pub enum FelisError {
     KittyError(#[from] kitty_remote_bindings::Error),
     #[error("strip prefix error")]
     StripPrefixError(#[from] StripPrefixError),
-}
-
-pub enum Command {
-    GetActiveFocusedWindow,
-    OpenInHelix {
-        path: PathBuf,
-        kitty_tab_id: Option<u32>,
-    },
-}
-
-#[derive(Debug, PartialEq)]
-pub enum Response {
-    Ack,
-    Message(String),
-    WindowId(u32),
 }
