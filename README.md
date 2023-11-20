@@ -1,6 +1,73 @@
-# felis
+# <p align="center"><code>kitty</code> + <code>helix</code> = <code>felis</code></p>
 
-`kitty` + `helix` = `felis`
+`felis` is the missing link between the `helix` editor and the `kitty` terminal: its purpose is to
+simplify the integration between this two software.
 
-`felis` is a daemon to control `kitty` through remote commands, with a heavy emphasis on simplifying
-`helix` related workflows.
+## Commands
+
+- open-file: opens a file in `helix`, by "typing" `ESC` + `:open path/to/file` + `ENTER` into the
+`kitty` window running `helix`.
+- open-browser: runs the given file browser (e.g. [broot](https://github.com/Canop/broot)),
+optionally in a `kitty` window overlay on top of `helix`, then opens the selected file.
+
+## Why is it useful?
+
+### Helix file explorer overlay
+
+Running a file browser from `helix` gets as simple as this:
+
+```toml
+[keys.normal.space]
+e = ":sh felis open-browser -l $(which broot)"
+```
+
+Notice that instead of just `broot`, the full path is used in this example, beause the program is
+going to run a `kitty` overlay, where the shell environment is not initialised, so PATHs might be
+missing (especially if you use `home-manager`).
+
+To make this work, `broot` needs some configuration so that it prints the path and then exists when
+a file is selected:
+
+```toml
+[[verbs]]
+apply_to = "file"
+internal = ":print_path"
+invocation = "print_path"
+key = "enter"
+leave_broot = true
+shortcut = "pp"
+```
+
+### Opening files from anywhere
+
+Opening any selected file from `kitty` can be configured like this:
+
+```conf
+map ctrl+cmd+o pass_selection_to_program /path/to/felis/bin/felis open-file
+```
+
+This is particularly useful when another program, e.g. a test runner prints file paths to the
+standard output. Just select them with the mouse and open them in `helix`.
+
+## How is felis trying to find the right helix instance to open the file?
+
+If the path is relative, `felis` will try to determine the absolute path: if it can find a focused
+and active window, then it's going to use this window's working directory. Once this is done, it is
+going to try to find a window which runs `helix` (`../bin/hx`) and where the working directory is
+the same or the parent of the file's directory (it doesn't have to be direct parent).
+
+Let's see an example:
+
+In window (1) the working directory is `/path/to/felis`, and `helix` is running. In window (2)
+the working directory is the same, and we run some tests (so it is the focused active window),
+and the output says there's an error in lib.rs on line 13, column 3. We select `src/lib.rs:13:3`,
+hit the key combination that will pass this to `felis`, which in the end will run `felis open-file
+src/ lib.rs:13:3`. Based on the active focused window `felis` will resolve the absolute path as `/path/to/felis/src.lib.rs:13:3`,
+it will find window (1) as it is running `helix` and its working
+directory is the parent of the file. Once this window is found `felis` will send the key sequence to
+open the file, and then it will focus the window.
+
+## Roadmap
+
+- [ ] declaratively (probably via TOML) define tab/window layout as a project environment, with
+roles assigned to tabs/windows for easier scripting
