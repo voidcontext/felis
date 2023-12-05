@@ -270,9 +270,9 @@ checksum = "af150ab688ff2122fcef229be89cb50dd66af9e01a4ff320cc137eecc9bacc38"
 
 [[package]]
 name = "kitty-remote-bindings"
-version = "0.4.0"
+version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b272fadfd0893c78e1e1364cb6679532405db3b72bc81344d3ac529cfd94e6ad"
+checksum = "d19420dd123a24706ca595a66400756f1d3bb3da69a0b0fd36915cc1d98652d7"
 dependencies = [
  "kitty-remote-bindings-core",
  "kitty-remote-bindings-macros",
@@ -289,9 +289,9 @@ checksum = "cc79df3b7f66ccd9fc180696d90c8bdfc7cb8c1b6543b9cf5f970241b6f7d527"
 
 [[package]]
 name = "kitty-remote-bindings-macros"
-version = "0.1.0"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "19274737a74f83ff65ee19f2dee35c33f0a8109d9188953582e789df687a72c8"
+checksum = "bcd90c13c70490eb916c1b5670dddcf3a3179fc04d4655cb967e5fcbcac26e76"
 dependencies = [
  "convert_case",
  "proc-macro2",
