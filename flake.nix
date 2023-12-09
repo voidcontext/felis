@@ -6,7 +6,7 @@
     url = "github:ipetkov/crane";
     inputs.nixpkgs.follows = "nixpkgs";
   };
-  inputs.nix-rust-utils.url = "git+https://git.vdx.hu/voidcontext/nix-rust-utils.git?ref=refs/heads/skip-build-deps";
+  inputs.nix-rust-utils.url = "git+https://git.vdx.hu/voidcontext/nix-rust-utils.git?ref=refs/tags/v0.10.0";
   inputs.nix-rust-utils.inputs.nixpkgs.follows = "nixpkgs";
   inputs.nix-rust-utils.inputs.crane.follows = "crane";
 
