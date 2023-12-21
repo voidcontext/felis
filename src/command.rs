@@ -43,12 +43,21 @@ pub async fn open_in_helix(
     };
 
     kitty.focus_window(Matcher::Id(kitty_window.id)).await?;
+    // Go to normal mode by hitting ESC
     kitty.send_text(Matcher::Id(kitty_window.id), r"\E").await?;
+    // Go to command mode
+    kitty.send_text(Matcher::Id(kitty_window.id), r":").await?;
+    // Paste the path first to avoid autocompletion triggering on the path segment after each
+    // character
     kitty
         .send_text(
             Matcher::Id(kitty_window.id),
-            format!(r":open {}\r", rel_path.to_string_lossy()).as_str(),
+            format!(r"{}", rel_path.to_string_lossy()).as_str(),
         )
+        .await?;
+    // Jump at the beginning of the command line, type open, then hit ENTER
+    kitty
+        .send_text(Matcher::Id(kitty_window.id), r"\x01open \r")
         .await?;
 
     Ok(())
@@ -217,11 +226,9 @@ mod test {
         expect_ls_success(&mut executor);
         expect_focus_window_succes(&mut executor, WindowId(1));
         expect_send_text_success(&mut executor, r"\E", WindowId(1));
-        expect_send_text_success(
-            &mut executor,
-            format!(r":open {path}\r").as_str(),
-            WindowId(1),
-        );
+        expect_send_text_success(&mut executor, r":", WindowId(1));
+        expect_send_text_success(&mut executor, r"src/lib.rs", WindowId(1));
+        expect_send_text_success(&mut executor, r"\x01open \r", WindowId(1));
 
         open_in_helix(
             &PathBuf::from(path),
@@ -240,7 +247,9 @@ mod test {
         expect_ls_success(&mut executor);
         expect_focus_window_succes(&mut executor, WindowId(1));
         expect_send_text_success(&mut executor, r"\E", WindowId(1));
-        expect_send_text_success(&mut executor, r":open src/lib.rs\r", WindowId(1));
+        expect_send_text_success(&mut executor, r":", WindowId(1));
+        expect_send_text_success(&mut executor, r"src/lib.rs", WindowId(1));
+        expect_send_text_success(&mut executor, r"\x01open \r", WindowId(1));
 
         open_in_helix(
             &PathBuf::from(path),
@@ -258,11 +267,9 @@ mod test {
         let mut executor = MockExecutor::new();
         expect_ls_success(&mut executor);
         expect_send_text_success(&mut executor, r"\E", WindowId(1));
-        expect_send_text_success(
-            &mut executor,
-            format!(r":open {path}\r").as_str(),
-            WindowId(1),
-        );
+        expect_send_text_success(&mut executor, r":", WindowId(1));
+        expect_send_text_success(&mut executor, r"src/lib.rs", WindowId(1));
+        expect_send_text_success(&mut executor, r"\x01open \r", WindowId(1));
         expect_focus_window_succes(&mut executor, WindowId(1));
 
         open_in_helix(&PathBuf::from(path), None, &KittyTerminal::mock(executor))
@@ -277,11 +284,9 @@ mod test {
         let mut executor = MockExecutor::new();
         expect_ls_success(&mut executor);
         expect_send_text_success(&mut executor, r"\E", WindowId(1));
-        expect_send_text_success(
-            &mut executor,
-            format!(r":open {path}\r").as_str(),
-            WindowId(1),
-        );
+        expect_send_text_success(&mut executor, r":", WindowId(1));
+        expect_send_text_success(&mut executor, r"src/lib.rs", WindowId(1));
+        expect_send_text_success(&mut executor, r"\x01open \r", WindowId(1));
         expect_focus_window_succes(&mut executor, WindowId(1));
 
         open_in_helix(&PathBuf::from(path), None, &KittyTerminal::mock(executor))
