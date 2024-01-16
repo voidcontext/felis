@@ -1,11 +1,11 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use kitty_remote_bindings::{
     command::options::Matcher,
     model::{self, OsWindows, Window, WindowId},
 };
 
-use crate::{kitty_terminal::KittyTerminal, FelisError, Result};
+use crate::{fs::AbsolutePath, kitty_terminal::KittyTerminal, FelisError, Result};
 
 /// # Errors
 ///
@@ -23,7 +23,7 @@ pub async fn get_active_focused_window(kitty: &KittyTerminal) -> Result<WindowId
 ///
 /// Will return Err if Kitty terminal related operations fail
 pub async fn open_in_helix(
-    path: &Path,
+    path: &AbsolutePath,
     kitty_tab_id: Option<WindowId>,
     kitty: &KittyTerminal,
 ) -> Result<()> {
@@ -36,11 +36,10 @@ pub async fn open_in_helix(
         find_workspace(&windows, path)?
     };
 
-    let rel_path = if path.is_absolute() {
-        path.strip_prefix(window_cwd(kitty_window))?
-    } else {
-        path
-    };
+    // Once we have the kitty window where helix is running, we can use it to potentially  shorten
+    // the absolute path to a relative path from helix's working directory. This can speed up
+    // "typing" the path into helix.
+    let rel_path = path.as_ref().strip_prefix(window_cwd(kitty_window))?;
 
     kitty.focus_window(Matcher::Id(kitty_window.id)).await?;
     // Go to normal mode by hitting ESC
@@ -72,7 +71,9 @@ fn find_window_by_id(windows: &OsWindows, window_id: WindowId) -> Option<&Window
     })
 }
 
-fn focused_active_window(windows: &OsWindows) -> Option<&model::Window> {
+// TODO: this function should be in a different module probably
+#[must_use]
+pub fn focused_active_window(windows: &OsWindows) -> Option<&model::Window> {
     windows
         .0
         .iter()
@@ -86,51 +87,31 @@ fn focused_active_window(windows: &OsWindows) -> Option<&model::Window> {
         })
 }
 
-fn window_cwd(window: &Window) -> &Path {
+// TODO: this function should be in a different module probably
+#[must_use]
+pub fn window_cwd(window: &Window) -> &Path {
     window.foreground_processes[0].cwd.as_path()
 }
 
-fn resolve_relative_path(windows: &OsWindows, path: &Path) -> PathBuf {
-    // Resolving the relative path needs to happen by trying to find the active window, and get the
-    // working directory from its first process. We cannot just get it from the client (the felis
-    // program working dir), because it might not be runnnig from a shell context, it might be
-    // executed by kitty (e.g. when using `pass_selection_to_program`).
-    //
-    // This could fail badly if the selection is not in the active, focused window.
-    if path.is_relative() {
-        if let Some(window) = focused_active_window(windows) {
-            let mut path_buf = PathBuf::new();
-            path_buf.push(window_cwd(window));
-            path_buf.push(path);
-            path_buf
-        } else {
-            path.to_path_buf()
-        }
-    } else {
-        path.to_path_buf()
-    }
-}
-
-fn find_workspace<'a>(windows: &'a OsWindows, path: &Path) -> Result<&'a Window> {
-    let path = resolve_relative_path(windows, path);
-
+fn find_workspace<'a>(windows: &'a OsWindows, path: &AbsolutePath) -> Result<&'a Window> {
     let workspace_window = windows.0.iter().find_map(|os_window| {
         os_window.tabs.iter().find_map(|tab| {
             tab.windows.iter().find(|w| {
                 w.foreground_processes
                     .iter()
-                    .any(|process| is_helix_bin(process) && is_in_workspace(process, &path))
+                    .any(|process| is_helix_bin(process) && is_in_workspace(process, path))
             })
         })
     });
 
     workspace_window.ok_or_else(|| FelisError::UnexpectedError {
-        message: format!("Couldn't find workspace for file {path:?}"),
+        message: format!("Couldn't find workspace for file {:?}", path.as_ref()),
     })
 }
 
-fn is_in_workspace(process: &model::Process, path: &Path) -> bool {
-    path.parent()
+fn is_in_workspace(process: &model::Process, path: &AbsolutePath) -> bool {
+    path.as_ref()
+        .parent()
         .map_or(false, |p| p.starts_with(process.cwd.as_path()))
 }
 
@@ -143,7 +124,6 @@ mod test {
 
     use std::{
         os::unix::process::ExitStatusExt,
-        path::PathBuf,
         process::{ExitStatus, Output},
     };
 
@@ -156,6 +136,7 @@ mod test {
 
     use crate::{
         command::{get_active_focused_window, open_in_helix},
+        fs::AbsolutePath,
         kitty_terminal::{test_fixture, KittyTerminal, MockExecutor},
     };
 
@@ -220,7 +201,7 @@ mod test {
 
     #[tokio::test]
     async fn test_open_in_helix_with_kitty_tab_id() {
-        let path = "src/lib.rs";
+        let path = "/path/to/felis/src/lib.rs";
 
         let mut executor = MockExecutor::new();
         expect_ls_success(&mut executor);
@@ -231,7 +212,7 @@ mod test {
         expect_send_text_success(&mut executor, r"\x01open \r", WindowId(1));
 
         open_in_helix(
-            &PathBuf::from(path),
+            &AbsolutePath::try_from(path).unwrap(),
             Some(WindowId(1)),
             &KittyTerminal::mock(executor),
         )
@@ -252,7 +233,7 @@ mod test {
         expect_send_text_success(&mut executor, r"\x01open \r", WindowId(1));
 
         open_in_helix(
-            &PathBuf::from(path),
+            &AbsolutePath::try_from(path).unwrap(),
             Some(WindowId(1)),
             &KittyTerminal::mock(executor),
         )
@@ -262,7 +243,7 @@ mod test {
 
     #[tokio::test]
     async fn test_open_in_helix_without_kitty_tab_id() {
-        let path = "src/lib.rs";
+        let path = "/path/to/felis/src/lib.rs";
 
         let mut executor = MockExecutor::new();
         expect_ls_success(&mut executor);
@@ -272,14 +253,18 @@ mod test {
         expect_send_text_success(&mut executor, r"\x01open \r", WindowId(1));
         expect_focus_window_succes(&mut executor, WindowId(1));
 
-        open_in_helix(&PathBuf::from(path), None, &KittyTerminal::mock(executor))
-            .await
-            .unwrap();
+        open_in_helix(
+            &AbsolutePath::try_from(path).unwrap(),
+            None,
+            &KittyTerminal::mock(executor),
+        )
+        .await
+        .unwrap();
     }
 
     #[tokio::test]
     async fn test_open_in_helix_without_kitty_tab_id_command_resolves_relative_path() {
-        let path = "src/lib.rs";
+        let path = "/path/to/felis/src/lib.rs";
 
         let mut executor = MockExecutor::new();
         expect_ls_success(&mut executor);
@@ -289,8 +274,12 @@ mod test {
         expect_send_text_success(&mut executor, r"\x01open \r", WindowId(1));
         expect_focus_window_succes(&mut executor, WindowId(1));
 
-        open_in_helix(&PathBuf::from(path), None, &KittyTerminal::mock(executor))
-            .await
-            .unwrap();
+        open_in_helix(
+            &AbsolutePath::try_from(path).unwrap(),
+            None,
+            &KittyTerminal::mock(executor),
+        )
+        .await
+        .unwrap();
     }
 }

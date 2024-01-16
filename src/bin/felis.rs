@@ -5,7 +5,9 @@ use std::{
 };
 
 use clap::{Parser, Subcommand};
-use felis::{command, kitty_terminal::KittyTerminal, Result};
+use felis::{
+    command, fs::AbsolutePath, kitty_terminal::KittyTerminal, Context, Environment, Result,
+};
 use kitty_remote_bindings::{
     command::options::{Cwd, LaunchType},
     model::WindowId,
@@ -28,6 +30,9 @@ enum Command {
         /// Open the file in the helix process running in the given window
         #[arg(short, long)]
         window_id: Option<u32>, // TODO: change this to Option<WindowId>
+        /// The context of how felis is used, this drives how file paths are determined
+        #[arg(long, default_value_t = Context::Shell)]
+        context: Context,
     },
     /// Run the given file browser / file manager and then open the selected file in helix
     OpenBrowser {
@@ -52,12 +57,20 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     let kitty = KittyTerminal::new(kitty_socket()?);
+
     match cli.command {
         Command::GetActiveFocusedWindow => {
             let window_id = command::get_active_focused_window(&kitty).await?;
             println!("{}", window_id.0);
         }
-        Command::OpenFile { path, window_id } => {
+
+        Command::OpenFile {
+            path,
+            window_id,
+            context,
+        } => {
+            let env = env(&context, &kitty).await?;
+            let path = AbsolutePath::resolve(&path, &env)?;
             command::open_in_helix(&path, window_id.map(WindowId), &kitty).await?;
         }
 
@@ -94,6 +107,8 @@ async fn main() -> Result<()> {
                 let out = out.trim_end();
                 let path = PathBuf::from(out);
 
+                let path = AbsolutePath::try_from(path)?;
+
                 command::open_in_helix(&path, window_id.map(WindowId), &kitty).await?;
             }
         }
@@ -119,6 +134,19 @@ fn kitty_socket() -> Result<String> {
             Err(felis::FelisError::UnexpectedError {
                 message: "couldn't determine kitty socket".to_string(),
             })
+        }
+    }
+}
+
+async fn env(context: &Context, terminal: &KittyTerminal) -> Result<Environment> {
+    match context {
+        Context::Shell => {
+            let cwd = std::env::current_dir()?;
+            Ok(Environment::Shell(cwd))
+        }
+        Context::Terminal => {
+            let windows = terminal.ls().await?;
+            Ok(Environment::Kitty(windows))
         }
     }
 }

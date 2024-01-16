@@ -43,7 +43,7 @@ shortcut = "pp"
 Opening any selected file from `kitty` can be configured like this:
 
 ```conf
-map ctrl+cmd+o pass_selection_to_program /path/to/felis/bin/felis open-file
+map ctrl+cmd+o pass_selection_to_program /path/to/felis/bin/felis open-file --context terminal
 ```
 
 This is particularly useful when another program, e.g. a test runner prints file paths to the
@@ -51,22 +51,23 @@ standard output. Just select them with the mouse and open them in `helix`.
 
 ## How is felis trying to find the right helix instance to open the file?
 
-If the path is relative, `felis` will try to determine the absolute path: if it can find a focused
-and active window, then it's going to use this window's working directory. Once this is done, it is
-going to try to find a window which runs `helix` (`../bin/hx`) and where the working directory is
-the same or the parent of the file's directory (it doesn't have to be direct parent).
+If the path is relative, `felis` will try to determine the absolute path depending on the context.
+In a "shell" context it is going to use the current directory (getcwd equivalent), in a "terminal"
+context it lists `kitty` windows and tries to find the currently focused window and uses its
+current working directory attribute. Once this is done, it is going to try to find a window which
+runs `helix` (`../bin/hx`) and where the working directory is the same or the parent of the file's
+directory (it doesn't have to be direct parent).
 
 Let's see an example:
 
-In window (1) the working directory is `/path/to/felis`, and `helix` is running. In window (2)
-the working directory is the same, and we run some tests (so it is the focused active window),
-and the output says there's an error in lib.rs on line 13, column 3. We select `src/lib.rs:13:3`,
-hit the key combination that will pass this to `felis`, which in the end will run `felis open-file
-src/ lib.rs:13:3`. Based on the active focused window `felis` will resolve the absolute path as `/path/to/felis/src.lib.rs:13:3`,
-it will find window (1) as it is running `helix` and its working
-directory is the parent of the file. Once this window is found `felis` will send the key sequence to
-open the file, and then it will focus the window.
-
+In window (1) the working directory is `/path/to/felis`, and `helix` is running. In window (2) the
+working directory is the same, and we run some tests (so it is the focused active window), and the
+output says there's an error in lib.rs on line 13, column 3. We select `src/lib.rs:13:3`, hit the
+key combination that will pass this to `felis`, which in the end will run `felis open-file --context
+terminal src/ lib.rs:13:3`. Based on the active focused window `felis` will resolve the absolute
+path as `/path/to/felis/src.lib.rs:13:3`, it will find window (1) as it is running `helix` and its
+working directory is the parent of the file. Once this window is found `felis` will send the key
+sequence to open the file, and then it will focus the window.
 ## Roadmap
 
 - [ ] declaratively (probably via TOML) define tab/window layout as a project environment, with

@@ -263,7 +263,7 @@ pub mod test_fixture {
                                 foreground_processes: vec![
                                     Process {
                                         pid: 983,
-                                        cwd: PathBuf::from("/path/to/felis"),
+                                        cwd: PathBuf::from("/path/to/other-project"),
                                         cmdline: vec![
                                             "-zsh".to_string(),
                                         ],
@@ -388,7 +388,7 @@ pub mod test_fixture {
                 "cmdline": [
                   "-zsh"
                 ],
-                "cwd": "/path/to/felis",
+                "cwd": "/path/to/other-project",
                 "pid": 983
               }
             ],
