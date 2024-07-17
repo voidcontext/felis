@@ -3,6 +3,8 @@ when:
     branch: main
   - event: pull_request
 
+platform: linux/amd64
+
 steps:
   check:
     image: git.vdx.hu/voidcontext/woodpecker-plugin-nix-attic:0.1.1
