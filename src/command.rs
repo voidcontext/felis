@@ -26,6 +26,7 @@ pub async fn open_in_helix(
     path: &AbsolutePath,
     kitty_tab_id: Option<WindowId>,
     kitty: &KittyTerminal,
+    steel: bool,
 ) -> Result<()> {
     let windows = kitty.ls().await?;
     let kitty_window = if let Some(id) = kitty_tab_id {
@@ -41,23 +42,37 @@ pub async fn open_in_helix(
     // "typing" the path into helix.
     let rel_path = path.as_ref().strip_prefix(window_cwd(kitty_window))?;
 
-    kitty.focus_window(Matcher::Id(kitty_window.id)).await?;
-    // Go to normal mode by hitting ESC
-    kitty.send_text(Matcher::Id(kitty_window.id), r"\E").await?;
-    // Go to command mode
-    kitty.send_text(Matcher::Id(kitty_window.id), r":").await?;
-    // Paste the path first to avoid autocompletion triggering on the path segment after each
-    // character
-    kitty
-        .send_text(
-            Matcher::Id(kitty_window.id),
-            format!(r"{}", rel_path.to_string_lossy()).as_str(),
-        )
-        .await?;
-    // Jump at the beginning of the command line, type open, then hit ENTER
-    kitty
-        .send_text(Matcher::Id(kitty_window.id), r"\x01open \r")
-        .await?;
+    if steel {
+        std::fs::write("/tmp/felis-open.txt", rel_path.to_string_lossy().as_bytes())?;
+
+        kitty.focus_window(Matcher::Id(kitty_window.id)).await?;
+        // Go to normal mode by hitting ESC
+        kitty.send_text(Matcher::Id(kitty_window.id), r"\E").await?;
+        // Go to command mode and run felis-open command
+        kitty
+            .send_text(Matcher::Id(kitty_window.id), r":felis-open\r")
+            .await?;
+    } else {
+        // Send open command directly to helix
+
+        kitty.focus_window(Matcher::Id(kitty_window.id)).await?;
+        // Go to normal mode by hitting ESC
+        kitty.send_text(Matcher::Id(kitty_window.id), r"\E").await?;
+        // Go to command mode
+        kitty.send_text(Matcher::Id(kitty_window.id), r":").await?;
+        // Paste the path first to avoid autocompletion triggering on the path segment after each
+        // character
+        kitty
+            .send_text(
+                Matcher::Id(kitty_window.id),
+                format!(r"{}", rel_path.to_string_lossy()).as_str(),
+            )
+            .await?;
+        // Jump at the beginning of the command line, type open, then hit ENTER
+        kitty
+            .send_text(Matcher::Id(kitty_window.id), r"\x01open \r")
+            .await?;
+    }
 
     Ok(())
 }
@@ -215,6 +230,7 @@ mod test {
             &AbsolutePath::try_from(path).unwrap(),
             Some(WindowId(1)),
             &KittyTerminal::mock(executor),
+            false,
         )
         .await
         .unwrap();
@@ -236,6 +252,7 @@ mod test {
             &AbsolutePath::try_from(path).unwrap(),
             Some(WindowId(1)),
             &KittyTerminal::mock(executor),
+            false,
         )
         .await
         .unwrap();
@@ -257,6 +274,7 @@ mod test {
             &AbsolutePath::try_from(path).unwrap(),
             None,
             &KittyTerminal::mock(executor),
+            false,
         )
         .await
         .unwrap();
@@ -278,6 +296,7 @@ mod test {
             &AbsolutePath::try_from(path).unwrap(),
             None,
             &KittyTerminal::mock(executor),
+            false,
         )
         .await
         .unwrap();

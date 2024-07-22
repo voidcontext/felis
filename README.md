@@ -6,7 +6,19 @@ simplify the integration between this two software.
 ## Commands
 
 - open-file: opens a file in `helix`, by "typing" `ESC` + `:open path/to/file` + `ENTER` into the
-`kitty` window running `helix`.
+  `kitty` window running `helix`.
+  The command has an optional `--steel` switch, which is not going to type the full path into the
+  editor, but write in a file then run the `felis-open` command. This command doesn't exist in
+  `helix`,  but can be added, if you're on the branch that adds the Steel integration. Just add this
+  to your `helix.scm`:
+  ```scheme
+  (require (prefix-in helix. "helix/commands.scm"))
+  
+  (provide felis-open)
+  (define (felis-open)
+    (let ((path ( ~> (open-input-file "/tmp/felis-open.txt") (read-port-to-string))))
+      (helix.open path)))
+  ```
 - open-browser: runs the given file browser (e.g. [broot](https://github.com/Canop/broot)),
 optionally in a `kitty` window overlay on top of `helix`, then opens the selected file.
 
@@ -68,6 +80,7 @@ terminal src/ lib.rs:13:3`. Based on the active focused window `felis` will reso
 path as `/path/to/felis/src.lib.rs:13:3`, it will find window (1) as it is running `helix` and its
 working directory is the parent of the file. Once this window is found `felis` will send the key
 sequence to open the file, and then it will focus the window.
+
 ## Roadmap
 
 - [ ] declaratively (probably via TOML) define tab/window layout as a project environment, with

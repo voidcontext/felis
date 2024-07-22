@@ -33,6 +33,9 @@ enum Command {
         /// The context of how felis is used, this drives how file paths are determined
         #[arg(long, default_value_t = Context::Shell)]
         context: Context,
+        /// Wether to use the steel plugin to open the file
+        #[arg(long, default_value_t = false)]
+        steel: bool,
     },
     /// Run the given file browser / file manager and then open the selected file in helix
     OpenBrowser {
@@ -49,6 +52,9 @@ enum Command {
         /// browser there. This is useful when felis is running from an editor.
         #[arg(short, long, default_value_t = false)]
         launch_overlay: bool,
+        /// Wether to use the steel plugin to open the file
+        #[arg(long, default_value_t = false)]
+        steel: bool,
     },
 }
 
@@ -68,16 +74,18 @@ async fn main() -> Result<()> {
             path,
             window_id,
             context,
+            steel,
         } => {
             let env = env(&context, &kitty).await?;
             let path = AbsolutePath::resolve(&path, &env)?;
-            command::open_in_helix(&path, window_id.map(WindowId), &kitty).await?;
+            command::open_in_helix(&path, window_id.map(WindowId), &kitty, steel).await?;
         }
 
         Command::OpenBrowser {
             file_browser,
             window_id,
             launch_overlay,
+            steel,
         } => {
             if launch_overlay {
                 let executable = std::env::current_exe()?;
@@ -92,6 +100,10 @@ async fn main() -> Result<()> {
                     args.push("--tab-id".to_string());
                     args.push(tab_id.to_string());
                 };
+
+                if steel {
+                    args.push("--steel".to_string());
+                }
 
                 // TODO: replace this with a KittyComman
                 kitty
@@ -109,7 +121,7 @@ async fn main() -> Result<()> {
 
                 let path = AbsolutePath::try_from(path)?;
 
-                command::open_in_helix(&path, window_id.map(WindowId), &kitty).await?;
+                command::open_in_helix(&path, window_id.map(WindowId), &kitty, steel).await?;
             }
         }
     };
