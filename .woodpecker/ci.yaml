@@ -3,7 +3,8 @@ when:
     branch: main
   - event: pull_request
 
-platform: linux/amd64
+labels:
+  platform: linux/amd64
 
 steps:
   check:
