@@ -10,7 +10,6 @@
   inputs.nix-rust-utils.inputs.nixpkgs.follows = "nixpkgs";
   inputs.nix-rust-utils.inputs.crane.follows = "crane";
 
-
   inputs.rust-overlay.url = "github:oxalica/rust-overlay";
 
   outputs = {
@@ -24,6 +23,11 @@
       nix-rust-utils.mkLib {
         inherit pkgs;
         toolchain = pkgs.rust-bin.stable.latest.default;
+      };
+    mkPlugin = pkgs:
+      pkgs.writeTextFile {
+        name = "felis.scm";
+        text = builtins.readFile ./felis.scm;
       };
     mkFelis = pkgs: let
       nru = mkNru pkgs;
@@ -62,10 +66,16 @@
       nru = mkNru pkgs;
 
       felis = mkFelis pkgs;
+
+      helix-plugin = mkPlugin pkgs;
     in {
       checks = felis.checks;
 
-      packages.default = felis.crate;
+      packages.default = felis.crate.overrideAttrs {
+        passthru = {inherit helix-plugin;};
+      };
+
+      packages.helix-plugin = helix-plugin;
 
       devShells.default = nru.mkDevShell {
         inputsFrom = [felis.crate];
@@ -85,7 +95,9 @@
       };
 
       overlays.withHostPkgs = final: prev: {
-        felis = (mkFelis final).crate;
+        felis = (mkFelis final).crate.overrideAttrs {
+          passthru.helix-plugin = mkPlugin final;
+        };
       };
     };
 }

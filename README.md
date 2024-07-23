@@ -9,18 +9,39 @@ simplify the integration between this two software.
   `kitty` window running `helix`.
   The command has an optional `--steel` switch, which is not going to type the full path into the
   editor, but write in a file then run the `felis-open` command. This command doesn't exist in
-  `helix`,  but can be added, if you're on the branch that adds the Steel integration. Just add this
-  to your `helix.scm`:
-  ```scheme
-  (require (prefix-in helix. "helix/commands.scm"))
-  
-  (provide felis-open)
-  (define (felis-open)
-    (let ((path ( ~> (open-input-file "/tmp/felis-open.txt") (read-port-to-string))))
-      (helix.open path)))
-  ```
+  `helix`, but can be added, if you're on the branch that adds the Steel integration. See the plugin
+  section for more information.
 - open-browser: runs the given file browser (e.g. [broot](https://github.com/Canop/broot)),
-optionally in a `kitty` window overlay on top of `helix`, then opens the selected file.
+  optionally in a `kitty` window overlay on top of `helix`, then opens the selected file. This
+  command also has a `--steel` option that uses helix' plugin system.
+
+## Helix plugin
+
+This is heavily experimental, and only works with a specific branch that adds a 
+[steel](https://github.com/mattwparas/steel) based plugin system. The PR can be tracked 
+[here](https://github.com/helix-editor/helix/pull/8675).
+
+The helix plugin is exposed via the `default` package as a "passthru" attribute, and as standalone
+package called `helix-plugin`. The result if this derivation is a single file and this file should
+be symlinked into `~/.config/helix/`. After this the commands should just be wired into the main
+config, e.g. in `helix.scm`:
+
+```scheme
+(define felis-path "@felis@")
+(define broot-path "@broot@")
+
+(require "felis.scm")
+(provide felis-open
+         file-browser
+         file-browser-cwd)
+
+(define (file-browser)
+    (felis-file-browser felis-path broot-path))
+(define (file-browser-cwd)
+    (felis-file-browser-cwd felis-path broot-path))
+```
+
+_Please note: the actual paths needs to be substituted, e.g. with `pkgs.substituteAll` function._
 
 ## Why is it useful?
 
