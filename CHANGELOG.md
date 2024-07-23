@@ -2,6 +2,17 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 - - -
+## v0.2.0 - 2024-07-23
+#### Build system
+- **(ci)** fix platform filtering - (08ddb4e) - Gabor Pihaj
+- **(ci)** use amd64 platform only - (09261d5) - Gabor Pihaj
+#### Features
+- expose helix plugin through nix (requires an experimental build of helix) (#24) - (3cb9cb0) - Gabor Pihaj
+- add option to set working directory when opening a file browser (#23) - (170ad38) - Gabor Pihaj
+- open files faster by using shorter command + steel plugin (#22) - (6f13f09) - Gabor Pihaj
+
+- - -
+
 ## v0.1.0 - 2024-01-16
 #### Bug Fixes
 - handle clients disconnecting withouth sending any commands - (38e1dc9) - Gabor Pihaj
