@@ -43,6 +43,8 @@ enum Command {
         /// needs to print the path of then file to the standard output, e.g. a propertly configured
         /// `broot`
         file_browser: String,
+        /// Sets the current working directory to the given path when opens the file browser
+        cwd: Option<PathBuf>,
         /// Open the file in the helix process running in the given window. If not given felis will
         /// try to determine which helix instance is running in one the parent directories of the
         /// given file.
@@ -86,6 +88,7 @@ async fn main() -> Result<()> {
             window_id,
             launch_overlay,
             steel,
+            cwd,
         } => {
             if launch_overlay {
                 let executable = std::env::current_exe()?;
@@ -105,14 +108,27 @@ async fn main() -> Result<()> {
                     args.push("--steel".to_string());
                 }
 
+                if let Some(dir) = &cwd {
+                    args.push(dir.to_string_lossy().to_string());
+                }
+
+                let working_dir = if let Some(dir) = cwd {
+                    Cwd::Path(dir)
+                } else {
+                    Cwd::Current
+                };
+
                 // TODO: replace this with a KittyComman
-                kitty
-                    .launch(args, LaunchType::Overlay, Cwd::Current)
-                    .await?;
+                kitty.launch(args, LaunchType::Overlay, working_dir).await?;
             } else {
-                let mut child = tokio::process::Command::new(file_browser)
-                    .stdout(Stdio::piped())
-                    .spawn()?;
+                let mut cmd = tokio::process::Command::new(file_browser);
+
+                if let Some(dir) = cwd {
+                    cmd.current_dir(dir);
+                }
+
+                let mut child = cmd.stdout(Stdio::piped()).spawn()?;
+
                 let mut stdout = child.stdout.take().unwrap();
                 let mut out = String::new();
                 stdout.read_to_string(&mut out).await?;
