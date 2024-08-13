@@ -39,11 +39,19 @@ pub async fn open_in_helix(
 
     // Once we have the kitty window where helix is running, we can use it to potentially  shorten
     // the absolute path to a relative path from helix's working directory. This can speed up
-    // "typing" the path into helix.
-    let rel_path = path.as_ref().strip_prefix(window_cwd(kitty_window))?;
+    // "typing" the path into helix. We also remove any new lines from the path (this can happen
+    // when the path is copied from a small terminal window)
+    let rel_path = {
+        let p = path
+            .as_ref()
+            .strip_prefix(window_cwd(kitty_window))?
+            .to_string_lossy()
+            .replace('\n', "");
+        p.trim().to_owned()
+    };
 
     if steel {
-        std::fs::write("/tmp/felis-open.txt", rel_path.to_string_lossy().as_bytes())?;
+        std::fs::write("/tmp/felis-open.txt", rel_path.as_bytes())?;
 
         kitty.focus_window(Matcher::Id(kitty_window.id)).await?;
         // Go to normal mode by hitting ESC
@@ -63,10 +71,7 @@ pub async fn open_in_helix(
         // Paste the path first to avoid autocompletion triggering on the path segment after each
         // character
         kitty
-            .send_text(
-                Matcher::Id(kitty_window.id),
-                format!(r"{}", rel_path.to_string_lossy()).as_str(),
-            )
+            .send_text(Matcher::Id(kitty_window.id), &rel_path)
             .await?;
         // Jump at the beginning of the command line, type open, then hit ENTER
         kitty
