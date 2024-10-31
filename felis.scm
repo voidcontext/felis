@@ -8,18 +8,10 @@
 
 ;; Utils
 
-(define (editor-get-doc-if-exists doc-id)
-  (if (editor-doc-exists? doc-id) (editor->get-document doc-id) #f))
-
-(define (doc-path doc-id)
-  (let ((document (editor-get-doc-if-exists doc-id)))
-    (if document (Document-path document) #f)))
-
-(define (current-path)
+(define (current-doc-path)
   (let* ([focus (editor-focus)]
          [focus-doc-id (editor->doc-id focus)])
-
-    (doc-path focus-doc-id)))
+    (editor-document->path focus-doc-id)))
 
 ;; Commands
 
@@ -31,7 +23,7 @@
   (helix.run-shell-command felis-bin "open-browser" "-l" "--steel" browser-bin))
 
 (define (felis-file-browser-cwd felis-bin browser-bin)
-  (let ((current-file (current-path)))
+  (let ((current-file (current-doc-path)))
     (helix.run-shell-command felis-bin "open-browser" "-l" "--steel" browser-bin (trim-end-matches current-file (file-name current-file)))))
 
 
